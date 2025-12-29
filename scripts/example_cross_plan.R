@@ -7,6 +7,7 @@
 # 加载杂交计划模块
 source("R/mod_cross.R")
 
+get_crosses_by_batch("一")
 # =============================================================================
 # 示例1：使用亲本名称创建杂交计划
 # =============================================================================
@@ -28,6 +29,15 @@ result1 <- create_cross_plan(
   status = "planned",
   use_id = FALSE
 )
+
+#
+clear_cross_batches_db(
+  batch_names = c("2025春季批次"),
+  preview = FALSE,
+  db_path = "data/db/soy_cross.db"
+)
+
+
 
 # 查看结果
 cat("\n📊 计划摘要：\n")
@@ -117,11 +127,11 @@ cat(paste(rep("=", 70), collapse = ""), "\n\n")
 
 # 使用名称检查
 exists1 <- has_cross("中黄301", "天辰6号", use_id = FALSE)
-cat(glue::glue("中黄301 × 天辰6号 是否存在：{exists1}\n"))
+cat(glue::glue("中黄301/天辰6号 是否存在：{exists1}\n"))
 
 # 使用ID检查
 exists2 <- has_cross("P0001", "P0101", use_id = TRUE)
-cat(glue::glue("P0001 × P0101 是否存在：{exists2}\n"))
+cat(glue::glue("P0001/P0101 是否存在：{exists2}\n"))
 
 
 # =============================================================================
@@ -139,7 +149,7 @@ con <- dbConnect(SQLite(), "data/db/soy_cross.db")
 # 选择转基因亲本作为母本
 mothers_bulk <- dbGetQuery(con, "
   SELECT name FROM parents 
-  WHERE 转基因 = '是' 
+  WHERE 转基因 = 'G2' 
   LIMIT 10
 ")$name
 
@@ -182,3 +192,34 @@ cat("  3. 系统会自动跳过已存在的组合，避免重复\n")
 cat("  4. 反交默认开启，如不需要可设置 include_reciprocal = FALSE\n")
 cat("  5. 可使用 has_cross() 提前检查组合是否存在\n")
 cat("  6. 使用 summarize_cross_batches_db() 查看批次统计\n\n")
+
+
+
+
+
+##亲本1
+Nfother_names<-select_parent(转基因=="否",
+                             str_detect(审定编号, "2023")|str_detect(审定编号, "2024"),
+                             str_detect(适宜区域, "南片")|
+                               str_detect(适宜区域, "淮北")|
+                               str_detect(适宜区域, "河南")|
+                               str_detect(审定编号, "皖审")
+)
+
+Nfother_names<-union(Nfother_names,c("菏育6号"))
+#亲本2
+mather_names<-c("天辰6号","油6019","南农47","冀农科022","冀农科091",
+                "中黄340","华豆17","徐豆31","徐豆32","GM25H056","GM25H057")
+
+p1<-c("中黄301","南农66","皖宿112","华豆17","赣农科120",
+      "NAM0416","郓豆1号","中豆57","23WW011344","23WW011350","23WW011442",
+      "23WW011449","23WW011720","菏育6号","中黄340")
+#p2<-read.table("clipboard",header=FALSE)
+p2<-c("GLHJD_SY03","GLHJD_SY13")
+#第二步-配置转基因杂交组合
+set.seed(2356)
+mycross<-run_cross_plan(n = 28,
+                        p1,
+                        p2,
+                        content_value = MYPRE
+)

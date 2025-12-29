@@ -581,6 +581,112 @@ import_cross_matrix <- function(in_path, sheet = NULL, batch = NULL, skip_na = T
   return(result_df)
 }
 
+export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, include_inactive = TRUE, format = NULL, overwrite = FALSE, backup_before = TRUE) {
+  db_path <- normalize_path(db_path, must_exist = TRUE)
+  out_path <- normalize_path(out_path, create_dir = TRUE)
+  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  df <- DBI::dbReadTable(con, "parents")
+  if (!include_inactive && "active" %in% names(df)) {
+    df <- df[which(df$active == 1), , drop = FALSE]
+  }
+  write_table(list(parents = df), out_path, format = format, overwrite = overwrite, backup_before = backup_before)
+  invisible(out_path)
+}
+
+import_parents_from_file <- function(in_path, db_path = "data/db/soy_cross.db",
+                                     mode = c("upsert", "update", "insert"),
+                                     key = c("id", "name"), sheet = NULL,
+                                     backup_before = TRUE) {
+  mode <- match.arg(mode)
+  key <- match.arg(key)
+  in_path <- normalize_path(in_path, must_exist = TRUE)
+  db_path <- normalize_path(db_path, must_exist = TRUE)
+  fmt <- tolower(tools::file_ext(in_path))
+  if (fmt %in% c("xlsx", "xls")) {
+    df <- read_xlsx_internal(in_path, sheet = sheet)
+  } else if (fmt == "csv") {
+    df <- read.csv(in_path, stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+  } else if (fmt == "rds") {
+    obj <- readRDS(in_path)
+    df <- if (is.data.frame(obj)) obj else as.data.frame(obj, stringsAsFactors = FALSE)
+  } else {
+    stop("❌ 不支持的文件格式")
+  }
+  con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  if (backup_before) {
+    backup_db(db_path, backup_name = "parents_import")
+  }
+  db_fields <- DBI::dbListFields(con, "parents")
+  cols <- intersect(names(df), db_fields)
+  if (length(cols) == 0) stop("❌ 导入数据列与数据库不匹配")
+  df <- df[, cols, drop = FALSE]
+  if (key %in% names(df)) {
+    df[[key]] <- as.character(df[[key]])
+  } else {
+    stop("❌ 缺少关键列: ", key)
+  }
+  if ("active" %in% names(df)) {
+    suppressWarnings(df$active <- as.integer(df$active))
+    df$active[is.na(df$active)] <- 0L
+  }
+  now <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  n_ins <- 0L; n_upd <- 0L; n_skip <- 0L
+  DBI::dbBegin(con)
+  on.exit(try(DBI::dbRollback(con), silent = TRUE), add = TRUE)
+  for (i in seq_len(nrow(df))) {
+    row <- df[i, , drop = FALSE]
+    exists_n <- DBI::dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM parents WHERE ", key, " = ?"), params = list(row[[key]]))$n
+    if (mode == "insert") {
+      if (exists_n > 0) {
+        n_skip <- n_skip + 1L
+        next
+      }
+      ins_cols <- names(row)
+      vals <- unname(as.list(row[1, ins_cols]))
+      if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
+      if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
+      sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
+      DBI::dbExecute(con, sql, params = unname(vals))
+      n_ins <- n_ins + 1L
+    } else if (mode == "update") {
+      if (exists_n == 0) {
+        n_skip <- n_skip + 1L
+        next
+      }
+      upd_cols <- setdiff(names(row), key)
+      if (!("updated_at" %in% upd_cols)) { upd_cols <- c(upd_cols, "updated_at"); row[["updated_at"]] <- now }
+      set_clause <- paste(paste0(upd_cols, " = ?"), collapse = ", ")
+      sql <- paste0("UPDATE parents SET ", set_clause, " WHERE ", key, " = ?")
+      params <- c(unname(as.list(row[1, upd_cols])), unname(list(row[[key]])))
+      DBI::dbExecute(con, sql, params = unname(params))
+      n_upd <- n_upd + 1L
+    } else {
+      if (exists_n > 0) {
+        upd_cols <- setdiff(names(row), key)
+        if (!("updated_at" %in% upd_cols)) { upd_cols <- c(upd_cols, "updated_at"); row[["updated_at"]] <- now }
+        set_clause <- paste(paste0(upd_cols, " = ?"), collapse = ", ")
+        sql <- paste0("UPDATE parents SET ", set_clause, " WHERE ", key, " = ?")
+        params <- c(unname(as.list(row[1, upd_cols])), unname(list(row[[key]])))
+        DBI::dbExecute(con, sql, params = unname(params))
+        n_upd <- n_upd + 1L
+      } else {
+        ins_cols <- names(row)
+        vals <- unname(as.list(row[1, ins_cols]))
+        if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
+        if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
+        sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
+        DBI::dbExecute(con, sql, params = unname(vals))
+        n_ins <- n_ins + 1L
+      }
+    }
+  }
+  DBI::dbCommit(con)
+  on.exit(NULL, add = TRUE)
+  invisible(list(inserted = n_ins, updated = n_upd, skipped = n_skip, total = nrow(df)))
+}
+
 
 # ---- 模块信息 ----
 .utils_io_version <- "1.0.0"

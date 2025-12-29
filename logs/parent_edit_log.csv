@@ -1,0 +1,7 @@
+"timestamp","operation","details","status","user"
+"2025-12-29 16:49:36","soft_delete","id= P0003","success","zhaoq"
+"2025-12-29 17:00:32","add","name= 冀豆12","error","zhaoq"
+"2025-12-29 17:00:59","add","id= P0252 name= 冀豆100","success","zhaoq"
+"2025-12-29 17:01:18","hard_delete","id= P0252","success","zhaoq"
+"2025-12-29 17:05:07","add","id= P0252 name= 冀豆100","success","zhaoq"
+"2025-12-29 17:05:22","hard_delete","id= P0252","success","zhaoq"

@@ -1,13 +1,13 @@
 {
     "sortOrder": [
         {
-            "columnIndex": 2,
-            "ascending": true
+            "columnIndex": 4,
+            "ascending": false
         },
         {
-            "columnIndex": 3,
-            "ascending": false
+            "columnIndex": 2,
+            "ascending": true
         }
     ],
-    "path": "E:/FangCloudSync/R_WD360/Project/soy_cross/scripts"
+    "path": "E:/FangCloudSync/R_WD360/Project/soy_cross_v2/scripts"
 }

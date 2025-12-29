@@ -3,18 +3,18 @@ library(soyplant)
 library(openxlsx)
 library(dplyr)
 
-mycross<-get_crosses_by_batch("2025春季批次")
+mycross<-get_crosses_by_batch("一")
 mycross<-join_cross_parents(mycross)
 # 生成账本字段定义
 fields <- c("fieldid", "code", "place", "stageid", "name", "rows", "line_number", "rp")
-MYPRE<-"G25c6"
+
 # 组合前缀与文件路径
 myfilename <- paste0("output/",MYPRE,"test.xlsx",sep="")
 
 # 构建组合数据
 mydata <- data.frame(
-  ma = mycross$male_name,
-  pa = mycross$female_name,
+  ma = mycross$male_名称,
+  pa = mycross$female_名称,
   memo = paste(mycross$male_特征特性, mycross$female_特征特性, sep = "+")
 )
 #增加排序
@@ -30,10 +30,6 @@ my_combi <- get_combination(
   only = TRUE,
   order = FALSE
 )
-
-#回写到数据库，增加name信息
-update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025春季批次")
-
 
 # 添加年份
 my_combi$year <- 2025
@@ -63,5 +59,3 @@ savewb(
   filename = myfilename,
   overwrite = FALSE
 )
-
-

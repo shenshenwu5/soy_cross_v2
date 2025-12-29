@@ -1,0 +1,26 @@
+{
+    "id": "750B3BB3",
+    "path": "E:/FangCloudSync/R_WD360/Project/soy_cross/scripts/example_cross_plan.R",
+    "project_path": "scripts/example_cross_plan.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1766989858296.0,
+    "source_on_save": false,
+    "relative_order": 2,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "43,0",
+        "scrollLine": "29"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1766974386,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1766974386,
+    "read_only": false,
+    "read_only_alternatives": []
+}

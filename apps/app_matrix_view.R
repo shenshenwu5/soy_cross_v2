@@ -26,8 +26,8 @@ tryCatch({
   project_root <<- getwd()
 })
 
-# 如果工作目录已经是 scripts，则向上一层
-if (basename(project_root) == "scripts") {
+# 如果工作目录已经是 scripts 或 apps，则向上一层
+if (basename(project_root) %in% c("scripts", "apps")) {
   project_root <- dirname(project_root)
 }
 

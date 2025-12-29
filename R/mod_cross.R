@@ -785,96 +785,224 @@ get_crosses_by_batch <- function(
 #' @param db_path 数据库路径
 #' @param fields 字符向量，指定要关联的亲本字段（不含id）。如果为 NULL，则关联所有字段。
 #'
-#' @return 包含亲本信息的数据框
+# -----------------------------------------------------------------------------
+# Shiny 模块：杂交组合配置
+# -----------------------------------------------------------------------------
+
+#' 杂交组合配置 UI
 #' @export
-join_cross_parents <- function(
-    crosses_data,
-    db_path = "data/db/soy_cross.db",
-    fields = NULL
-) {
-  if (missing(crosses_data) || !is.data.frame(crosses_data)) {
-    stop("❌ 参数错误：crosses_data 必须是一个数据框")
-  }
-  if (nrow(crosses_data) == 0) return(crosses_data)
-  if (!all(c("female_id", "male_id") %in% names(crosses_data))) {
-    stop("❌ 数据框必须包含 'female_id' 和 'male_id' 列")
-  }
-  
-  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
-  
-  con <- dbConnect(SQLite(), db_path)
-  on.exit(dbDisconnect(con), add = TRUE)
-  
-  # 获取 parents 表结构和数据
-  # 如果字段未指定，获取除 id 外的所有字段
-  if (is.null(fields)) {
-    all_fields <- dbListFields(con, "parents")
-    fields <- setdiff(all_fields, "id")
-  } else {
-    # 验证请求的字段是否存在
-    all_fields <- dbListFields(con, "parents")
-    missing_fields <- setdiff(fields, all_fields)
-    if (length(missing_fields) > 0) {
-      warning("⚠️ 以下字段在 parents 表中不存在，将被忽略：", paste(missing_fields, collapse = ", "))
-      fields <- intersect(fields, all_fields)
+cross_config_ui <- function(id) {
+  ns <- NS(id)
+  tagList(
+    fluidRow(
+      # 步骤 1 & 2：亲本选择（左右分栏）
+      column(4,
+        h4("1. 选择母本"),
+        DT::dataTableOutput(ns("tbl_females"))
+      ),
+      column(4,
+        h4("2. 选择父本"),
+        DT::dataTableOutput(ns("tbl_males"))
+      ),
+      # 步骤 3 & 4：配置与执行
+      column(4,
+        h4("3. 配置参数"),
+        textInput(ns("input_batch"), "批次名称", value = format(Sys.Date(), "%Y春季")),
+        checkboxInput(ns("check_reciprocal"), "自动生成反交", TRUE),
+        hr(),
+        h4("4. 确认与生成"),
+        numericInput(ns("input_limit"), "限制数量 (可选)", value = NA, min = 1),
+        uiOutput(ns("ui_summary")),
+        actionButton(ns("btn_run"), "🚀 生成杂交计划", class = "btn-primary btn-lg btn-block")
+      )
+    )
+  )
+}
+
+#' 杂交组合配置 Server
+#' @export
+cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
+  # 尝试加载分析模块以支持冲突检测
+  if (file.exists("R/mod_analysis.R")) source("R/mod_analysis.R")
+
+  moduleServer(id, function(input, output, session) {
+
+    # 1. 数据加载 (获取所有字段以支持特征显示)
+    parents <- reactive({
+      con <- dbConnect(SQLite(), db_path)
+      on.exit(dbDisconnect(con))
+      # 获取所有列，后续根据列名动态展示
+      dbGetQuery(con, "SELECT * FROM parents WHERE active=1")
+    })
+
+    # 辅助函数：获取展示列
+    get_display_cols <- function(df) {
+      base_cols <- c("id", "name")
+      # 尝试查找特征列
+      extra_cols <- intersect(names(df), c("traits", "description", "features", "remarks"))
+      if (length(extra_cols) > 0) base_cols <- c(base_cols, extra_cols)
+      base_cols
     }
-  }
-  
-  if (length(fields) == 0) {
-    warning("⚠️ 无有效字段可关联")
-    return(crosses_data)
-  }
-  
-  # 构建查询语句以提取所需字段
-  cols_str <- paste(c("id", fields), collapse = ", ")
-  parents_sql <- glue("SELECT {cols_str} FROM parents")
-  parents_data <- dbGetQuery(con, parents_sql)
-  
-  # 准备母本数据
-  female_info <- parents_data %>%
-    rename_with(~ paste0("female_", .), .cols = all_of(fields))
-  
-  # 准备父本数据
-  male_info <- parents_data %>%
-    rename_with(~ paste0("male_", .), .cols = all_of(fields))
-  
-  # 执行连接
-  # 使用 left_join 确保即使找不到亲本信息（虽然不应发生），组合记录也会保留
-  result <- crosses_data %>%
-    left_join(female_info, by = c("female_id" = "id")) %>%
-    left_join(male_info, by = c("male_id" = "id"))
-  
-  return(result)
+
+    # 2. 渲染母本表格
+    output$tbl_females <- DT::renderDataTable({
+      df <- parents()
+      cols <- get_display_cols(df)
+      DT::datatable(df[, cols, drop = FALSE], selection = "multiple", options = list(pageLength = 10))
+    })
+
+    # 3. 准备父本数据 (含冲突检测)
+    males_data_reactive <- reactive({
+      df <- parents()
+      
+      # 获取选中的母本
+      selected_rows <- input$tbl_females_rows_selected
+      if (is.null(selected_rows) || length(selected_rows) == 0) {
+        df$is_conflict <- FALSE
+        return(df)
+      }
+
+      # 获取选中母本的名称 (find_unused_partners 需要名称)
+      # 注意：DT 的行号对应 parents() 的行号
+      selected_mothers <- df$name[selected_rows]
+      
+      # 冲突检测逻辑：
+      # 我们要高亮那些【已经】与选中母本配过组的父本。
+      # find_unused_partners 返回【未】配组的。
+      # 所以：冲突 = 所有父本 - 交集(每个母本的未配组对象)
+      # 或者更直接：对于每个选中的母本，找出其已配组对象，取并集。
+      
+      # 为了严格遵循 "调用 mod_analysis::find_unused_partners" 的要求：
+      if (exists("find_unused_partners")) {
+        # 计算每个母本的未配组父本 ID
+        unused_list <- lapply(selected_mothers, function(m_name) {
+          tryCatch({
+             # role="female" 表示 m_name 是母本，我们要找未配的父本
+             find_unused_partners(m_name, role = "female", db_path = db_path)$id
+          }, error = function(e) {
+             # 如果出错（如找不到亲本），假设没有未配组的（即全部冲突）或全部可用？
+             # 安全起见，假设全部可用，避免误报冲突
+             df$id 
+          })
+        })
+        
+        # 取交集：只有在所有选中母本中都“未配组”的父本，才是真正的“无冲突”
+        # 只要与任一选中母本配过组，即视为冲突（高亮提示）
+        # Wait. 
+        # Case 1: Select M1. Used with P1. Unused with P2. -> P1 Conflict.
+        # Case 2: Select M1, M2. 
+        # M1 used with P1. M2 used with P2.
+        # If I select P1: (M1, P1) is repeat. (M2, P1) is new. -> Conflict? Yes, partial conflict.
+        # If I select P2: (M1, P2) is new. (M2, P2) is repeat. -> Conflict? Yes.
+        # So, if a father is used by ANY of the selected mothers, it should be highlighted.
+        # Used_by_Any = Union(Used_by_M1, Used_by_M2...)
+        # Used_by_M = All - Unused_by_M
+        # So Used_by_Any = Union( (All - Unused_M1), (All - Unused_M2) )
+        # = All - Intersection(Unused_M1, Unused_M2...)
+        
+        common_unused_ids <- Reduce(intersect, unused_list)
+        df$is_conflict <- ! (df$id %in% common_unused_ids)
+        
+      } else {
+        # Fallback if function not found
+        df$is_conflict <- FALSE
+      }
+      
+      df
+    })
+
+    # 4. 渲染父本表格 (显示 name 列和 is_conflict 列)
+    output$tbl_males <- DT::renderDataTable({
+      df <- males_data_reactive()
+      cols <- get_display_cols(df)
+      
+      has_conflict <- "is_conflict" %in% names(df)
+      
+      # 如果有冲突列，将其加入到显示列中
+      if (has_conflict && !("is_conflict" %in% cols)) {
+        cols <- c(cols, "is_conflict")
+      }
+      
+      # 只显示指定的列（包括 name 和 is_conflict）
+      dt <- DT::datatable(
+        df[, cols, drop = FALSE],
+        selection = "multiple", 
+        options = list(pageLength = 10)
+      )
+      
+      # 应用样式：根据 is_conflict 列改变行背景颜色
+      if (has_conflict) {
+        dt <- dt %>% DT::formatStyle(
+          'id', valueColumns = 'is_conflict', 
+          target = 'row',
+          backgroundColor = DT::styleEqual(c(TRUE, FALSE), c('#ffeeba', 'white')), 
+          title = DT::styleEqual(c(TRUE, FALSE), c('该父本已与选中的某位母本配过组', ''))
+        )
+      }
+      
+      dt
+    })
+
+    # 3. 实时摘要
+    output$ui_summary <- renderUI({
+      n_f <- length(input$tbl_females_rows_selected)
+      n_m <- length(input$tbl_males_rows_selected)
+      n_total <- n_f * n_m
+      if (input$check_reciprocal) n_total <- n_total * 2
+
+      tagList(
+        p(glue::glue("已选母本: {n_f}")),
+        p(glue::glue("已选父本: {n_m}")),
+        p(glue::glue("预计组合: {n_total}"), style = "font-weight: bold; color: blue;")
+      )
+    })
+
+    # 4. 执行逻辑
+    observeEvent(input$btn_run, {
+      req(input$input_batch)
+
+      # 获取选中行的 ID
+      p_data <- parents()
+      f_ids <- p_data$id[input$tbl_females_rows_selected]
+      m_ids <- p_data$id[input$tbl_males_rows_selected]
+
+      if (length(f_ids) == 0 || length(m_ids) == 0) {
+        showNotification("请至少选择一个母本和一个父本", type = "error")
+        return()
+      }
+
+      withProgress(message = '正在生成计划...', {
+        tryCatch({
+          if (is.na(input$input_limit)) {
+            # 全量生成
+            res <- create_cross_plan(
+              batch_name = input$input_batch,
+              mothers = f_ids,
+              fathers = m_ids,
+              include_reciprocal = input$check_reciprocal,
+              use_id = TRUE,
+              db_path = db_path
+            )
+          } else {
+            # 限量生成
+            res <- create_cross_plan_n(
+              batch_name = input$input_batch,
+              mothers = f_ids,
+              fathers = m_ids,
+              n = input$input_limit,
+              include_reciprocal = input$check_reciprocal,
+              use_id = TRUE,
+              db_path = db_path
+            )
+          }
+
+          showNotification(glue::glue("成功！新增 {res$summary$new_crosses} 个组合"), type = "message")
+
+        }, error = function(e) {
+          showNotification(paste("错误:", e$message), type = "error")
+        })
+      })
+    })
+  })
 }
 
-list_cross_batches_db <- function(
-    db_path = "data/db/soy_cross.db"
-) {
-  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
-  con <- dbConnect(SQLite(), db_path)
-  on.exit(dbDisconnect(con), add = TRUE)
-  res <- dbGetQuery(con, "SELECT DISTINCT batch FROM crosses WHERE batch IS NOT NULL ORDER BY batch ASC")
-  return(res)
-}
-
-get_crosses_by_batch <- function(
-    batch,
-    db_path = "data/db/soy_cross.db",
-    include_reciprocal = FALSE
-) {
-  if (missing(batch) || !nzchar(batch)) stop("❌ 参数错误：batch 不能为空")
-  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
-  con <- dbConnect(SQLite(), db_path)
-  on.exit(dbDisconnect(con), add = TRUE)
-  
-  sql <- "SELECT * FROM crosses WHERE batch = ?"
-  params <- list(batch)
-  
-  if (!include_reciprocal) {
-    sql <- paste0(sql, " AND is_reciprocal = 0")
-  }
-  
-  sql <- paste0(sql, " ORDER BY updated_at DESC")
-  result <- dbGetQuery(con, sql, params = params)
-  return(result)
-}

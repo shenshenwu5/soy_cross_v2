@@ -81,21 +81,30 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
         dbGetQuery(con, sql)
       }
     }
-    output$tbl_parents <- DT::renderDataTable({
-      df <- load_parents(input$filter_active, input$search_name)
-      DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
+    # 响应式触发器，用于刷新数据
+    refresh_trigger <- reactiveVal(0)
+
+    # 响应式数据源
+    parents_data <- reactive({
+      refresh_trigger() # 依赖触发器
+      load_parents(input$filter_active, input$search_name)
     })
+
+    # 单一渲染出口
+    output$tbl_parents <- DT::renderDataTable({
+      DT::datatable(parents_data(), selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
+    })
+
     observeEvent(input$btn_refresh, {
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已刷新", type = "message")
     })
+
     get_selected_row <- reactive({
       s <- input$tbl_parents_rows_selected
       if (is.null(s) || length(s) == 0) return(NULL)
-      df <- load_parents(input$filter_active, input$search_name)
+      # 使用当前缓存的数据，而不是重新查询数据库
+      df <- parents_data()
       df[s[1], , drop = FALSE]
     })
     observeEvent(input$btn_add, {
@@ -138,10 +147,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       sql <- paste0("INSERT INTO parents (", paste(cols, collapse = ", "), ") VALUES (", paste(rep("?", length(cols)), collapse = ", "), ")")
       dbExecute(con, sql, params = unname(vals))
       log_write("add", paste("id=", id, "name=", name))
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已新增", type = "message")
     })
     observeEvent(input$btn_edit, {
@@ -236,10 +242,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       params <- c(unname(as.list(vals[upd_cols])), orig_row$id)
       dbExecute(con, sql, params = unname(params))
       log_write("edit", paste("id=", orig_row$id))
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已修改", type = "message")
     })
     observeEvent(input$btn_enable, {
@@ -254,10 +257,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       now <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
       dbExecute(con, "UPDATE parents SET active = 1, updated_at = ? WHERE id = ?", params = unname(list(now, id)))
       log_write("enable", paste("id=", id))
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已启用", type = "message")
     })
     observeEvent(input$btn_soft_del, {
@@ -272,10 +272,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       now <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
       dbExecute(con, "UPDATE parents SET active = 0, updated_at = ? WHERE id = ?", params = unname(list(now, id)))
       log_write("soft_delete", paste("id=", id))
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已停用", type = "message")
     })
     observeEvent(input$btn_hard_del, {
@@ -316,10 +313,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       dbExecute(con, "DELETE FROM parents WHERE id = ?", params = list(id))
       log_write("hard_delete", paste("id=", id))
       pending_delete_id(NULL)
-      output$tbl_parents <- DT::renderDataTable({
-        df <- load_parents(input$filter_active, input$search_name)
-        DT::datatable(df, selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
-      })
+      refresh_trigger(refresh_trigger() + 1)
       showNotification("已删除", type = "message")
     })
   })

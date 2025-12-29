@@ -3,7 +3,7 @@ library(soyplant)
 library(openxlsx)
 library(dplyr)
 
-mycross<-get_crosses_by_batch("2025春季批次")
+mycross<-get_crosses_by_batch("2025夏季批次")
 mycross<-join_cross_parents(mycross)
 # 生成账本字段定义
 fields <- c("fieldid", "code", "place", "stageid", "name", "rows", "line_number", "rp")
@@ -15,8 +15,13 @@ myfilename <- paste0("output/",MYPRE,"test.xlsx",sep="")
 mydata <- data.frame(
   ma = mycross$male_name,
   pa = mycross$female_name,
-  memo = paste(mycross$male_特征特性, mycross$female_特征特性, sep = "+")
+  stringsAsFactors = FALSE
 )
+# 检查数据框结构
+if (nrow(mydata) == 0) {
+  stop("❌ 错误：未获取到任何杂交组合数据，请检查批次名称或数据库连接")
+}
+
 #增加排序
 mydata <- mydata %>%
   arrange(desc(ma), desc(pa))
@@ -32,7 +37,7 @@ my_combi <- get_combination(
 )
 
 #回写到数据库，增加name信息
-update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025春季批次")
+update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025夏季批次")
 
 
 # 添加年份

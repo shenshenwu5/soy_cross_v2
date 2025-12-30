@@ -93,7 +93,7 @@ ui <- navbarPage("杂交组合配置", id = "steps",
   tabPanel("D 批次管理",
     fluidPage(
       fluidRow(
-        column(4,
+        column(4, style = "border-right: 1px solid #ddd; padding-right: 20px;",
           h4("批次列表"),
           div(style="margin-bottom: 10px;",
             actionButton("refresh_batches", "刷新", icon = icon("refresh"), class = "btn-info btn-sm"),
@@ -230,14 +230,41 @@ server <- function(input, output, session) {
     sql <- paste0("SELECT female_id, male_id, name FROM crosses WHERE (female_id IN (", in_f, ") AND male_id IN (", in_m, ")) OR (female_id IN (", in_m, ") AND male_id IN (", in_f, "))")
     ex_df <- dbGetQuery(con, sql)
     
-    # 生成选择矩阵（默认全选 "TRUE"，后续根据情况修改）
+    # 生成选择矩阵（默认全选 "TRUE"）
+    # 增加第一列为 "Name" (母本名称)
+    # 增加第一行为 "ID" (父本 ID)
+    
+    # 1. 构造数据
+    # Main Body: Mother Name + Checkboxes
     mat_vals <- matrix("TRUE", nrow=length(f_ids), ncol=length(m_ids))
-    df_mat <- as.data.frame(mat_vals, stringsAsFactors = FALSE, check.names = FALSE)
-    rownames(df_mat) <- f_names
-    colnames(df_mat) <- m_names
-
-    # 计算已存在组合坐标，并填充名称
+    df_main <- data.frame(Name = f_names, mat_vals, stringsAsFactors = FALSE, check.names = FALSE)
+    # 列名设为 "Name" + 父本 IDs (作为表头显示)
+    colnames(df_main) <- c("Name", m_ids)
+    
+    # Top Row: "" + Father Names (作为第一行数据显示)
+    # 第一列留空或设为 "Father Name"
+    df_top <- as.data.frame(t(c("", m_names)), stringsAsFactors = FALSE)
+    colnames(df_top) <- c("Name", m_ids)
+    
+    # Combine
+    df_mat <- rbind(df_top, df_main)
+    
+    # 行名为母本 ID (第一行设为 "")
+    rownames(df_mat) <- c("", f_ids)
+    
+    # 2. 设置单元格属性
     cell_props <- list()
+    
+    # (A) Top Row (Row 0): Header style
+    for (c in 0:(ncol(df_mat)-1)) {
+       cell_props[[length(cell_props)+1]] <- list(row = 0, col = c, readOnly = TRUE, className = 'htCenter htMiddle header-cell', type = 'text')
+    }
+
+    # (B) First Column (Col 0) - starting from Row 1: Name style
+    for (r in 1:(nrow(df_mat)-1)) {
+       cell_props[[length(cell_props)+1]] <- list(row = r, col = 0, readOnly = TRUE, className = 'htCenter htMiddle name-cell')
+    }
+
     if (nrow(ex_df)>0) {
       for (i in seq_len(nrow(ex_df))) {
         fi <- ex_df$female_id[i]; mi <- ex_df$male_id[i]; nm <- ex_df$name[i]
@@ -247,35 +274,15 @@ server <- function(input, output, session) {
         c_idx <- match(mi, m_ids)
         
         if (!is.na(r_idx) && !is.na(c_idx)) {
-          df_mat[r_idx, c_idx] <- nm
-          cell_props[[length(cell_props)+1]] <- list(row = r_idx-1, col = c_idx-1, type = 'text', readOnly = TRUE, className = 'existing')
+          # df_mat Row Index: r_idx (Mother Index) + 1 (Header Row) -> 对应 Row r_idx
+          # df_mat Col Index: c_idx (Father Index) + 1 (Name Col) -> 对应 Col c_idx
+          # Handsontable is 0-based.
+          # Row 0 is ID. Row 1 is Mother 1.
+          # r_idx 1 (Mother 1) -> Row 1. Correct.
+          
+          df_mat[r_idx + 1, c_idx + 1] <- nm
+          cell_props[[length(cell_props)+1]] <- list(row = r_idx, col = c_idx, type = 'text', readOnly = TRUE, className = 'existing')
         }
-        
-        # 查找反交坐标 (fi in m_ids, mi in f_ids) -> 这里是否要显示？
-        # 用户需求是"这个组合被配置过了"，通常指正交或反交。
-        # 如果当前矩阵位置是 (Mother A, Father B)，而数据库里有 (Mother B, Father A)，
-        # 这算是"配置过了"吗？通常正反交是分开的。
-        # 但之前的逻辑 existing_coords 是把两者都算的。
-        # 之前的逻辑：
-        # if (fi %in% f_ids && mi %in% m_ids) ...
-        # else if (fi %in% m_ids && mi %in% f_ids) ...
-        # 如果是反交存在，是否要在正交位置显示？
-        # 如果当前位置是 A x B。
-        # 数据库有 B x A (name: B-A).
-        # A x B 位置是否要显示 "B-A"？或者只是 A x B 自己的状态？
-        # 通常矩阵里的单元格 (Row=A, Col=B) 代表 A x B。
-        # 如果 A x B 已存在，显示名称。
-        # 如果 B x A 已存在，那是 (Row=B, Col=A) 的事。
-        # 所以只需要匹配 (Row=Female, Col=Male) 与 (Database Female, Database Male)。
-        # 之前的 existing_coords 逻辑似乎是想把正反交都标记出来。
-        # 但矩阵是 非对称的 (Rows=Moms, Cols=Dads)。
-        # 如果 Row i 是 A, Col j 是 B. Cell is A x B.
-        # 只有当 DB 中有 female=A, male=B 时，才是这个 cell 的 match。
-        # DB 中 female=B, male=A 是另一个 cell (如果 B 在 Moms 里, A 在 Dads 里)。
-        # 所以只需要精确匹配。
-        
-        # 修正：只匹配 exact match
-        # 但考虑到 names 可能有 mapping 问题，直接用 id match
       }
     }
     
@@ -283,33 +290,50 @@ server <- function(input, output, session) {
     for (i in seq_along(f_ids)) {
       for (j in seq_along(m_ids)) {
         if (f_ids[i] == m_ids[j]) {
-          df_mat[i, j] <- "FALSE" # 自交默认不选
-          cell_props[[length(cell_props)+1]] <- list(row = i-1, col = j-1, readOnly = TRUE, className = 'diagonal')
+          # df_mat Row: i + 1, Col: j + 1
+          df_mat[i + 1, j + 1] <- "FALSE" # 自交默认不选
+          cell_props[[length(cell_props)+1]] <- list(row = i, col = j, readOnly = TRUE, className = 'diagonal')
         }
       }
     }
 
     # 创建表
-    ht <- rhandsontable::rhandsontable(df_mat, rowHeaders = f_names, cell = cell_props) %>%
-      rhandsontable::hot_table(height = 500)
+    ht <- rhandsontable::rhandsontable(df_mat, rowHeaders = c("", f_ids), cell = cell_props)
 
     # 列设置为 checkbox (处理 "TRUE"/"FALSE" 字符串)
-    widths <- pmax(80, pmin(300, nchar(m_names)*12))
-    for (cn in colnames(df_mat)) {
+    # 第一列是 Name (Text), 其他是 Checkbox
+    widths <- c(120, pmax(80, pmin(300, nchar(m_names)*12)))
+    
+    # 其他列设置 Checkbox
+    for (cn in m_ids) {
       ht <- rhandsontable::hot_col(ht, cn, type = 'checkbox', checkedTemplate = "TRUE", uncheckedTemplate = "FALSE")
     }
+    
     ht <- rhandsontable::hot_cols(ht, manualColumnResize = TRUE, colWidths = widths)
     ht <- rhandsontable::hot_cols(ht, renderer = "function (instance, td, row, col, prop, value, cellProperties) {
+      // 默认渲染逻辑
       if (cellProperties.type === 'checkbox') {
         Handsontable.renderers.CheckboxRenderer.apply(this, arguments);
       } else {
         Handsontable.renderers.TextRenderer.apply(this, arguments);
       }
       
-      if (cellProperties.readOnly) {
+      // 样式覆盖
+      td.style.color = 'black';
+      
+      if (row === 0) {
+          // ID Row
+          td.style.background = '#e6e6e6'; 
+          td.style.fontWeight = 'bold';
+          td.style.textAlign = 'center';
+      } else if (col === 0) {
+          // Name Column
+          td.style.background = '#f2f2f2'; 
+          td.style.fontWeight = 'bold';
+      } else if (cellProperties.readOnly) {
          if (cellProperties.className && cellProperties.className.indexOf('diagonal') > -1) {
              td.style.background = '#f8d7da'; // Pink for diagonal
-         } else {
+         } else if (cellProperties.className && cellProperties.className.indexOf('existing') > -1) {
              td.style.background = '#e2e3e5'; // Gray for existing
          }
       } else {
@@ -317,36 +341,64 @@ server <- function(input, output, session) {
       }
     }")
 
-    # 移除之前的 hot_cell 循环，因为已经集成到 cell_props
+    ht <- rhandsontable::hot_table(ht, height = 500, rowHeaderWidth = 120)
     
     ht
   })
   output$matrix_summary <- renderText({
     x <- input$matrix; if (is.null(x)) return("")
-    m <- as.matrix(hot_to_r(x));
-    # 重新计算已存在组合与自交数量
+    
+    # 统计当前选中 (Checkbox 为 "TRUE")
+    m_raw <- hot_to_r(x)
+    
+    # 移除第一列 Name
+    if (ncol(m_raw) > 1) m_raw <- m_raw[, -1, drop=FALSE]
+    
+    # 移除第一行 ID Header
+    if (nrow(m_raw) > 1) m_raw <- m_raw[-1, , drop=FALSE]
+    
+    m_mat <- as.matrix(m_raw)
+    n_selected <- sum(m_mat == "TRUE", na.rm = TRUE)
+    
+    # 重新计算分布
     f_ids <- females_sel(); m_ids <- males_sel();
-    dfp <- parents(); id2name <- setNames(dfp$name, dfp$id)
-    f_names <- unname(id2name[f_ids]); m_names <- unname(id2name[m_ids])
     con <- dbConnect(SQLite(), db_path); on.exit(dbDisconnect(con), add = TRUE)
     in_f <- paste(sprintf("'%s'", f_ids), collapse = ",")
     in_m <- paste(sprintf("'%s'", m_ids), collapse = ",")
-    sql <- paste0("SELECT female_id, male_id FROM crosses WHERE (female_id IN (", in_f, ") AND male_id IN (", in_m, ")) OR (female_id IN (", in_m, ") AND male_id IN (", in_f, "))")
+    
+    # 只查询正交匹配 (Row=Female, Col=Male)
+    sql <- paste0("SELECT female_id, male_id FROM crosses WHERE female_id IN (", in_f, ") AND male_id IN (", in_m, ")")
     ex_df <- dbGetQuery(con, sql)
-    n_exist <- 0L
-    if (nrow(ex_df)>0) {
-      for (i in seq_len(nrow(ex_df))) {
-        fi <- ex_df$female_id[i]; mi <- ex_df$male_id[i]
-        if ((fi %in% f_ids && mi %in% m_ids) || (fi %in% m_ids && mi %in% f_ids)) {
-          n_exist <- n_exist + 1L
+    ex_df <- unique(ex_df) # 去重
+    
+    n_db_match <- nrow(ex_df) # DB中匹配当前矩阵位置的记录数 (包含可能的自交脏数据)
+    
+    # 计算自交 (Row ID == Col ID)
+    diag_ids <- intersect(f_ids, m_ids)
+    n_diag_total <- length(diag_ids) # 理论上的自交格数 (粉色)
+    
+    # 检查 DB 中有多少自交记录
+    n_diag_in_db <- 0
+    if (n_db_match > 0 && n_diag_total > 0) {
+      for (d in diag_ids) {
+        if (any(ex_df$female_id == d & ex_df$male_id == d)) {
+          n_diag_in_db <- n_diag_in_db + 1
         }
       }
     }
-    n_diag <- length(intersect(f_ids, m_ids))
+    
+    # 分类统计：
+    # 1. 已存在 (灰色): DB中存在 且 非自交
+    n_gray <- n_db_match - n_diag_in_db
+    
+    # 2. 自交 (粉色): 无论是否在 DB 中，界面上都优先显示为自交
+    n_pink <- n_diag_total
+    
+    # 3. 可配置 (白色): 总数 - 灰色 - 粉色
     total_cells <- length(f_ids) * length(m_ids)
-    n_config <- total_cells - n_exist - n_diag
-    n_ignore <- 0L
-    glue("可配置: {n_config}，已存在: {n_exist}，忽略: {n_ignore}")
+    n_white <- total_cells - n_gray - n_pink
+    
+    glue("可配置: {n_white}，已存在: {n_gray}，自交: {n_pink} | 当前选中: {n_selected}")
   })
   observeEvent(input$confirm_matrix, {
     # 已移除确认按钮，保留空逻辑占位避免错误引用
@@ -356,15 +408,34 @@ server <- function(input, output, session) {
   observeEvent(input$run_write, {
     req(input$batch)
     x <- input$matrix; if (is.null(x)) { showNotification("矩阵为空", type="warning"); return(NULL) }
-    m <- as.matrix(hot_to_r(x)); f_names <- rownames(m); m_names <- colnames(m)
+    
+    m_raw <- hot_to_r(x)
+    
+    # 移除第一行 ID Header
+    if (nrow(m_raw) > 1) m_raw <- m_raw[-1, , drop=FALSE]
+    
+    f_ids_from_row <- rownames(m_raw) # 行名为母本ID
+    
+    # 移除第一列 Name
+    if (ncol(m_raw) > 1) m_raw <- m_raw[, -1, drop=FALSE]
+    m <- as.matrix(m_raw)
+    
+    m_names <- colnames(m)
     dfp <- parents(); name2id <- setNames(dfp$id, dfp$name)
     
     # 查找选中的组合（值为 "TRUE" 的单元格）
     pairs_idx <- which(m == "TRUE", arr.ind=TRUE)
     if (nrow(pairs_idx)==0) { showNotification("无可配置组合", type="warning"); return(NULL) }
+    
+    # pairs_idx[,1] 是行索引 (对应 f_ids_from_row)
+    # pairs_idx[,2] 是列索引 (对应 m_names -> 现已改为 ID)
+    
+    # 注意：m_names 现在已经是 ID 了 (在 renderRHandsontable 中 colnames(df_main) <- c("Name", m_ids))
+    # 所以不需要再用 name2id 进行转换
+    
     pairs <- data.frame(
-      female_id = unname(name2id[f_names[pairs_idx[,1]]]),
-      male_id   = unname(name2id[m_names[pairs_idx[,2]]]),
+      female_id = f_ids_from_row[pairs_idx[,1]],
+      male_id   = m_names[pairs_idx[,2]],
       stringsAsFactors = FALSE
     ) %>% dplyr::filter(female_id != male_id)
     
@@ -453,10 +524,25 @@ server <- function(input, output, session) {
   output$batch_list_table <- DT::renderDataTable({
     df <- batches_df()
     if (is.null(df) || nrow(df) == 0) return(NULL)
-    # 简单的列重命名
-    DT::datatable(df, selection = "single", class = "compact stripe hover", 
-                  colnames = c("批次", "总数", "正交", "反交", "状态数", "状态", "更新时间")[1:ncol(df)],
-                  options = list(pageLength = 15, dom = 'ftp'))
+    
+    # 只保留：批次、正交数、更新时间
+    # 假设 df 列名为: batch, total_crosses, direct_crosses, reciprocal_crosses, last_updated...
+    # 我们需要确认列名是否存在，避免报错
+    
+    cols_to_show <- c("batch", "direct_crosses", "last_updated")
+    # 如果是 summarize_cross_batches_db 返回的，列名应该是这些
+    # 如果是 fallback SQL 返回的，也是这些
+    
+    # 简单的防御性检查
+    available_cols <- intersect(cols_to_show, names(df))
+    df_show <- df[, available_cols, drop = FALSE]
+    
+    DT::datatable(df_show, 
+                  selection = "single", 
+                  class = "compact stripe hover", 
+                  colnames = c("批次", "正交数", "更新时间"),
+                  rownames = FALSE,
+                  options = list(pageLength = 15, dom = 'ftp', autoWidth = FALSE))
   })
   
   # 渲染批次详情
@@ -518,7 +604,141 @@ server <- function(input, output, session) {
       showNotification(paste("删除失败:", e$message), type = "error")
     })
   })
-}
 
+  # E 生成帐本
+  # ------------------------------------------------------------------
+  
+  # 动态更新批次选择
+  observe({
+    df_b <- batches_df()
+    if (!is.null(df_b) && nrow(df_b) > 0) {
+      # 保持当前选择（如果存在）
+      curr <- isolate(input$gen_batch)
+      choices <- df_b$batch
+      selected <- if (!is.null(curr) && curr %in% choices) curr else choices[1]
+      updateSelectInput(session, "gen_batch", choices = choices, selected = selected)
+    }
+  })
+  
+  store_gen <- reactiveValues(my_combi = NULL, planted = NULL)
+  
+  # 生成预览
+  observeEvent(input$btn_calc_preview, {
+    req(input$gen_batch)
+    
+    tryCatch({
+      # 1. 获取数据
+      if (exists("get_crosses_by_batch")) {
+        # 尝试传递 db_path，如果函数支持
+        # 根据 run_cross_app.R line 557 的用法，它支持 db_path
+        mycross <- get_crosses_by_batch(batch = input$gen_batch, db_path = db_path) 
+      } else {
+        con <- dbConnect(SQLite(), db_path)
+        on.exit(dbDisconnect(con), add = TRUE)
+        mycross <- dbGetQuery(con, "SELECT * FROM crosses WHERE batch = ?", params = list(input$gen_batch))
+      }
+      
+      if (nrow(mycross) == 0) {
+        showNotification("该批次无数据", type = "warning")
+        return()
+      }
+      
+      # join parents info
+      if (exists("join_cross_parents")) {
+        mydata <- join_cross_parents(mycross)
+      } else {
+        df_p <- parents()
+        # 简单的合并兜底
+        mydata <- merge(mycross, df_p, by.x="female_id", by.y="id", suffixes=c("", "_f"))
+        mydata <- merge(mydata, df_p, by.x="male_id", by.y="id", suffixes=c("", "_m"))
+      }
+      
+      # 2. 生成组合编号
+      if (exists("get_combination")) {
+        my_combi <- get_combination(
+          data = mydata,
+          prefix = input$gen_prefix,
+          startN = input$gen_start_n,
+          digits = input$gen_digits,
+          only = TRUE,
+          order = FALSE
+        )
+        store_gen$my_combi <- my_combi
+      } else {
+        stop("找不到 get_combination 函数")
+      }
+      
+      # 3. 排图
+      if (exists("planting")) {
+        planted <- planting(
+          mydata = my_combi,
+          place = input$gen_place,
+          rows = input$gen_rows,
+          rp = input$gen_rp,
+          interval = input$gen_interval
+        )
+        store_gen$planted <- planted
+      } else {
+        stop("找不到 planting 函数")
+      }
+      
+      showNotification("预览生成成功", type = "message")
+      
+    }, error = function(e) {
+      showNotification(paste("生成失败:", e$message), type = "error")
+    })
+  })
+  
+  # 渲染表格
+  output$tbl_preview_combi <- DT::renderDataTable({
+    req(store_gen$my_combi)
+    DT::datatable(store_gen$my_combi, options = list(pageLength = 10, scrollX = TRUE))
+  })
+  
+  output$tbl_preview_plant <- DT::renderDataTable({
+    req(store_gen$planted)
+    DT::datatable(store_gen$planted, options = list(pageLength = 10, scrollX = TRUE))
+  })
+  
+  # 回写数据库
+  observeEvent(input$btn_save_db_name, {
+    req(store_gen$my_combi)
+    tryCatch({
+      if (exists("update_cross_names_from_df")) {
+        # 仅传递必要字段，匹配 jobs/cross_book.R 的用法
+        cols_to_update <- intersect(c("name", "ma", "pa"), names(store_gen$my_combi))
+        update_cross_names_from_df(store_gen$my_combi[, cols_to_update, drop=FALSE], input$gen_batch)
+        showNotification("数据库更新成功", type = "message")
+      } else {
+        stop("找不到 update_cross_names_from_df 函数")
+      }
+    }, error = function(e) {
+      showNotification(paste("更新失败:", e$message), type = "error")
+    })
+  })
+  
+  # 导出 Excel
+  output$btn_export_xlsx <- downloadHandler(
+    filename = function() { paste0("CrossBook_", input$gen_prefix, "_", input$gen_batch, ".xlsx") },
+    content = function(file) {
+      req(store_gen$my_combi, store_gen$planted)
+      
+      fields <- c("fieldid", "code", "place", "stageid", "name", "rows", "line_number", "rp")
+      
+      if (exists("savewb")) {
+        savewb(
+          origin = store_gen$my_combi,
+          planting = store_gen$planted,
+          myview = store_gen$planted[, intersect(c(fields, "ma", "pa"), names(store_gen$planted)), drop=FALSE],
+          combi_matrix = if(exists("combination_matrix")) combination_matrix(store_gen$my_combi) else NULL,
+          filename = file,
+          overwrite = TRUE
+        )
+      } else {
+        stop("找不到 savewb 函数")
+      }
+    }
+  )
+}
 
 shinyApp(ui, server)

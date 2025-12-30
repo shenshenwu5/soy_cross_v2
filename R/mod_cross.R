@@ -1000,3 +1000,82 @@ cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
   })
 }
 
+# -----------------------------------------------------------------------------
+# 辅助函数：关联亲本
+# -----------------------------------------------------------------------------
+
+#' 关联亲本信息到杂交记录
+#'
+#' @description
+#' 将杂交记录中的 female_id 和 male_id 与 parents 表关联，获取亲本的详细信息。
+#' 同时保留兼容字段 female_name, male_name
+#'
+#' @param crosses_data 数据框，必须包含 female_id 和 male_id 列
+#' @param db_path 数据库路径，默认 "data/db/soy_cross.db"
+#'
+#' @return 包含亲本详细信息的数据框
+#' @export
+join_cross_parents <- function(crosses_data, db_path = "data/db/soy_cross.db") {
+  if (missing(crosses_data) || !is.data.frame(crosses_data)) {
+    stop("❌ 参数错误：crosses_data 必须是一个数据框")
+  }
+  
+  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
+  
+  # 获取 parents 数据 (获取全部列)
+  con <- dbConnect(SQLite(), db_path)
+  on.exit(dbDisconnect(con), add = TRUE)
+  parents_df <- dbGetQuery(con, "SELECT * FROM parents")
+  
+  # 准备母本数据 (前缀 female_)
+  female_df <- parents_df
+  names(female_df) <- paste0("female_", names(female_df))
+  
+  # 准备父本数据 (前缀 male_)
+  male_df <- parents_df
+  names(male_df) <- paste0("male_", names(male_df))
+  
+  # 使用 left_join 替代 merge 以保持原始顺序
+  # 关联母本：female_id -> female_id (parents表原本的id变成了female_id)
+  res <- crosses_data %>%
+    left_join(female_df, by = "female_id")
+    
+  # 关联父本：male_id -> male_id (parents表原本的id变成了male_id)
+  res <- res %>%
+    left_join(male_df, by = "male_id")
+  
+  # --- 添加兼容性/便利性字段 ---
+  
+  # 为了 get_combination 兼容性，确保有 ma, pa (代表名称)
+  if ("female_name" %in% names(res)) res$pa <- res$female_name
+  if ("male_name" %in% names(res)) res$ma <- res$male_name
+  
+  # --- 调整列顺序：按性状交替排列 (female_XX, male_XX) ---
+  
+  # 1. 获取 parents 表的原始列名（排除 id）
+  parent_base_cols <- setdiff(names(parents_df), "id")
+  
+  # 2. 构建交替列名列表
+  interleaved_cols <- character(0)
+  for (col in parent_base_cols) {
+    # 用户要求：按 female_XX, male_XX 顺序排列
+    interleaved_cols <- c(interleaved_cols, paste0("female_", col), paste0("male_", col))
+  }
+  
+  # 3. 确定最终顺序
+  original_cols <- names(crosses_data)
+  current_cols <- names(res)
+  
+  # 确保只包含实际存在的列
+  valid_interleaved <- intersect(interleaved_cols, current_cols)
+  
+  # 其他列（如新添加的兼容性字段，或 crosses_data 中未包含但在 res 中的列）
+  other_cols <- setdiff(current_cols, c(original_cols, valid_interleaved))
+  
+  final_order <- c(original_cols, valid_interleaved, other_cols)
+  
+  res <- res[, final_order, drop = FALSE]
+  
+  return(res)
+}
+

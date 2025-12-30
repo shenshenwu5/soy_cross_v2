@@ -1,13 +1,34 @@
 #devtools::load_all("E:/FangCloudSync/R_WD360/Project/soyplant")
-library(soyplant)
 library(openxlsx)
 library(dplyr)
+source("R/mod_cross.R")
+library(soyplant)
 
-mycross<-get_crosses_by_batch("2025夏季批次")
+mycross<-get_crosses_by_batch("2025春季")
+
 mycross<-join_cross_parents(mycross)
-# 生成账本字段定义
+
+
+#主要参数
 fields <- c("fieldid", "code", "place", "stageid", "name", "rows", "line_number", "rp")
 MYPRE<-"G25c6"
+##
+startN = 1
+only = TRUE
+order = FALSE
+###
+interval = 999
+s_prefix = MYPRE
+place = "武汉"
+rp = 1
+digits = 3
+ck = NULL
+rows = 2
+##
+overwrite = TRUE
+# 添加年份
+my_combi$year <- 2025
+
 # 组合前缀与文件路径
 myfilename <- paste0("output/",MYPRE,"test.xlsx",sep="")
 
@@ -28,7 +49,7 @@ mydata <- mydata %>%
 
 
 # 一：生成组合编码
-my_combi <- get_combination(
+my_combi <- soyplant::get_combination(
   mydata,
   prefix = MYPRE,
   startN = 1,
@@ -37,18 +58,13 @@ my_combi <- get_combination(
 )
 
 #回写到数据库，增加name信息
-update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025夏季批次")
-
-
-# 添加年份
-my_combi$year <- 2025
-
+update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025春季")
 
 
 
 # 二：生成种植计划
 planted <- my_combi |>
-  planting(
+  soyplant::planting(
     interval = 999,
     s_prefix = MYPRE,
     place = "武汉",
@@ -60,13 +76,13 @@ planted <- my_combi |>
   )
 
 # 三：保存 Excel 工作簿
-savewb(
+soyplant::savewb(
   origin = my_combi,
   planting = planted,
   myview = planted[, c(fields, "ma", "pa")],
   combi_matrix = combination_matrix(my_combi),
   filename = myfilename,
-  overwrite = FALSE
+  overwrite = TRUE
 )
 
 

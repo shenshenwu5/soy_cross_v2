@@ -552,70 +552,62 @@ has_cross <- function(
   return(result$n > 0)
 }
 
-#' 创建固定数量的杂交计划（精确 N 条）
+#' 创建指定组合的杂交计划
 #'
 #' @description
-#' 在给定候选母本/父本集合的前提下，生成不重复的组合，并仅插入前 N 条。
-#' 默认不添加反交，以确保总数精确为 N；如需反交，可设 include_reciprocal = TRUE（此时总插入数 > N）。
+#' 根据输入的确切组合列表（pairs）创建杂交计划。
+#' 自动处理去重、反交生成和数据库插入。
 #'
 #' @param batch_name 批次名
-#' @param mothers 母本名称或ID向量
-#' @param fathers 父本名称或ID向量
-#' @param n 整数，期望插入的组合数量（正交）
-#' @param db_path 数据库路径，默认 "data/db/soy_cross.db"
-#' @param include_reciprocal 是否为所选组合添加反交，默认 FALSE
-#' @param status 初始状态，默认 "planned"
-#' @param use_id TRUE 则 mothers/fathers 为 ID；FALSE 则为名称并自动转换
-#' @param strategy 选择策略："balanced" 或 "sequential"
+#' @param pairs 数据框，必须包含 female_id 和 male_id 列
+#' @param db_path 数据库路径
+#' @param include_reciprocal 是否为这些组合自动生成反交
+#' @param limit 可选的插入数量限制（仅针对正交）
+#' @param status 初始状态
 #'
 #' @return 列表：summary/new_crosses/skipped/db_updated
 #' @export
-create_cross_plan_n <- function(
+create_specific_cross_plan <- function(
     batch_name,
-    mothers,
-    fathers,
-    n,
+    pairs,
     db_path = "data/db/soy_cross.db",
-    include_reciprocal = FALSE,
-    status = "planned",
-    use_id = FALSE,
-    strategy = c("balanced", "sequential")
+    include_reciprocal = TRUE,
+    limit = NA,
+    status = "planned"
 ) {
-  strategy <- match.arg(strategy)
   if (missing(batch_name) || !nzchar(batch_name)) stop("❌ 参数错误：batch_name 不能为空")
-  if (missing(mothers) || length(mothers) == 0) stop("❌ 参数错误：mothers 列表不能为空")
-  if (missing(fathers) || length(fathers) == 0) stop("❌ 参数错误：fathers 列表不能为空")
-  if (missing(n) || !is.numeric(n) || n <= 0) stop("❌ 参数错误：n 必须为正整数")
+  if (missing(pairs) || !is.data.frame(pairs)) stop("❌ 参数错误：pairs 必须是数据框")
+  if (!all(c("female_id", "male_id") %in% names(pairs))) stop("❌ pairs 必须包含 female_id 和 male_id 列")
   if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
 
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
-  tables <- dbListTables(con)
-  if (!all(c("crosses","parents") %in% tables)) stop("❌ 数据库缺少 crosses 或 parents 表")
 
-  if (!use_id) {
-    mother_ids <- get_parent_ids_from_names(con, mothers)
-    father_ids <- get_parent_ids_from_names(con, fathers)
-  } else {
-    mother_ids <- mothers
-    father_ids <- fathers
+  # 1. 预处理：去重、去自交
+  candidates <- pairs %>%
+    select(female_id, male_id) %>%
+    distinct() %>%
+    filter(female_id != male_id) %>%
+    mutate(female_id = as.character(female_id), male_id = as.character(male_id)) # 确保字符型
+
+  if (nrow(candidates) == 0) {
+    return(list(summary = data.frame(batch_name, inserted_n=0, reciprocal_added=0, skipped_existing=0, db_updated=FALSE), new_crosses=data.frame(), skipped=data.frame(), db_updated=FALSE))
   }
-  candidates <- expand.grid(female_id = mother_ids, male_id = father_ids, stringsAsFactors = FALSE) %>%
-    dplyr::filter(female_id != male_id)
 
+  # 2. 检查正交已存在
   existing <- check_existing_crosses(con, candidates)
-  new_candidates <- candidates %>% anti_join(existing, by = c("female_id","male_id"))
-  if (nrow(new_candidates) == 0) {
-    message("ℹ️ 可用新组合为 0，未插入")
-    return(list(summary = data.frame(batch_name, requested_n = n, inserted_n = 0, skipped_existing = nrow(candidates), db_updated = FALSE), new_crosses = data.frame(), skipped = candidates, db_updated = FALSE))
+  new_candidates <- candidates %>% anti_join(existing, by = c("female_id", "male_id"))
+  skipped <- candidates %>% semi_join(existing, by = c("female_id", "male_id")) %>% mutate(type="正交", reason="已存在")
+
+  # 3. 应用 limit (仅对正交)
+  if (!is.na(limit) && limit > 0) {
+    to_insert <- head(new_candidates, limit)
+  } else {
+    to_insert <- new_candidates
   }
 
-  selected <- {
-    if (strategy == "balanced") new_candidates %>% arrange(female_id, male_id) %>% slice_head(n = min(n, nrow(new_candidates)))
-    else new_candidates %>% slice_head(n = min(n, nrow(new_candidates)))
-  }
-
-  to_insert <- selected %>% mutate(
+  # 4. 准备插入数据 (正交)
+  to_insert_df <- to_insert %>% mutate(
     id = generate_cross_id(female_id, male_id),
     batch = batch_name,
     name = paste0(female_id, "-", male_id),
@@ -626,66 +618,78 @@ create_cross_plan_n <- function(
     updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   ) %>% select(id, female_id, male_id, batch, name, seed_count, is_reciprocal, status, created_at, updated_at)
 
+  # 5. 处理反交
+  recip_to_insert_df <- data.frame()
+  recip_skipped_df <- data.frame()
+  
+  if (include_reciprocal && nrow(to_insert) > 0) {
+    # 基于【计划插入的正交】生成反交
+    # 逻辑：只要这个正交计划被写入（或者它是新的），就应该尝试写入对应的反交
+    recip_candidates <- data.frame(
+      female_id = to_insert$male_id,
+      male_id = to_insert$female_id,
+      stringsAsFactors = FALSE
+    ) %>% distinct()
+
+    if (nrow(recip_candidates) > 0) {
+      exr <- check_existing_crosses(con, recip_candidates)
+      
+      new_recip <- recip_candidates %>% anti_join(exr, by = c("female_id", "male_id"))
+      recip_skipped_temp <- recip_candidates %>% semi_join(exr, by = c("female_id", "male_id")) %>% mutate(type="反交", reason="已存在")
+      
+      recip_to_insert_df <- new_recip %>% mutate(
+        id = generate_cross_id(female_id, male_id),
+        batch = batch_name,
+        name = paste0(female_id, "-", male_id),
+        seed_count = NA_integer_,
+        is_reciprocal = 1L,
+        status = status,
+        created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+      ) %>% select(id, female_id, male_id, batch, name, seed_count, is_reciprocal, status, created_at, updated_at)
+      
+      recip_skipped_df <- recip_skipped_temp
+    }
+  }
+
+  # 6. 执行写入
   db_updated <- FALSE
   inserted_data <- NULL
+  
   tryCatch({
     dbBegin(con)
-    dbAppendTable(con, "crosses", to_insert)
+    if (nrow(to_insert_df) > 0) dbAppendTable(con, "crosses", to_insert_df)
+    if (nrow(recip_to_insert_df) > 0) dbAppendTable(con, "crosses", recip_to_insert_df)
     dbCommit(con)
     db_updated <- TRUE
-    inserted_data <- to_insert
-    message(glue::glue("✅ 已插入 {nrow(to_insert)} 条正交记录"))
+    inserted_data <- bind_rows(to_insert_df, recip_to_insert_df)
   }, error = function(e) {
     dbRollback(con)
     stop("❌ 插入失败：", e$message)
   })
 
-  recip_count <- 0L
-  if (include_reciprocal && nrow(selected) > 0) {
-    reciprocal_data <- selected %>% mutate(
-      id = generate_cross_id(male_id, female_id),
-      batch = batch_name,
-      name = paste0(male_id, "-", female_id),
-      seed_count = NA_integer_,
-      is_reciprocal = 1L,
-      status = status,
-      created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-      updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    ) %>% rename(female_id = male_id, male_id = female_id) %>%
-      select(id, female_id, male_id, batch, name, seed_count, is_reciprocal, status, created_at, updated_at)
-
-    existing_recip <- check_existing_crosses(con, reciprocal_data %>% select(female_id, male_id))
-    reciprocal_to_insert <- reciprocal_data %>% anti_join(existing_recip, by = c("female_id","male_id"))
-    recip_count <- nrow(reciprocal_to_insert)
-    if (recip_count > 0) {
-      tryCatch({
-        dbBegin(con)
-        dbAppendTable(con, "crosses", reciprocal_to_insert)
-        dbCommit(con)
-        inserted_data <- dplyr::bind_rows(inserted_data, reciprocal_to_insert)
-        message(glue::glue("🔄 已插入 {recip_count} 条反交记录"))
-      }, error = function(e) {
-        dbRollback(con)
-        warning("⚠️  反交插入失败：", e$message)
-      })
-    }
-  }
-
-  skipped <- candidates %>% semi_join(existing, by = c("female_id","male_id"))
+  # 7. 构造返回
+  all_skipped <- bind_rows(skipped, recip_skipped_df)
+  
   summary_df <- data.frame(
     batch_name = batch_name,
-    requested_n = n,
-    inserted_n = nrow(to_insert),
-    reciprocal_added = recip_count,
-    total_candidates = nrow(candidates),
-    available_new = nrow(new_candidates),
-    skipped_existing = nrow(skipped),
+    inserted_n = nrow(to_insert_df),
+    reciprocal_added = nrow(recip_to_insert_df),
+    skipped_direct = nrow(skipped),
+    skipped_recip = nrow(recip_skipped_df),
+    total_inserted = nrow(to_insert_df) + nrow(recip_to_insert_df),
     db_updated = db_updated,
-    timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     stringsAsFactors = FALSE
   )
-  list(summary = summary_df, new_crosses = inserted_data %||% data.frame(), skipped = skipped, db_updated = db_updated)
+
+  list(
+    summary = summary_df, 
+    new_crosses = inserted_data %||% data.frame(), 
+    skipped = all_skipped, 
+    db_updated = db_updated
+  )
 }
+
 
 clear_cross_batches_db <- function(
     batch_names,
@@ -848,7 +852,12 @@ cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
     output$tbl_females <- DT::renderDataTable({
       df <- parents()
       cols <- get_display_cols(df)
-      DT::datatable(df[, cols, drop = FALSE], selection = "multiple", options = list(pageLength = 10))
+      DT::datatable(
+        df[, cols, drop = FALSE],
+        selection = "multiple",
+        filter = "top",
+        options = list(pageLength = 10)
+      )
     })
 
     # 3. 准备父本数据 (含冲突检测)
@@ -911,34 +920,19 @@ cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
       df
     })
 
-    # 4. 渲染父本表格 (显示 name 列和 is_conflict 列)
+    # 4. 渲染父本表格 (仅显示 id 和 name 两列)
     output$tbl_males <- DT::renderDataTable({
       df <- males_data_reactive()
       cols <- get_display_cols(df)
       
-      has_conflict <- "is_conflict" %in% names(df)
+      # 只显示 id 和 name，简化方案
+      cols <- c("id", "name")
       
-      # 如果有冲突列，将其加入到显示列中
-      if (has_conflict && !("is_conflict" %in% cols)) {
-        cols <- c(cols, "is_conflict")
-      }
-      
-      # 只显示指定的列（包括 name 和 is_conflict）
       dt <- DT::datatable(
         df[, cols, drop = FALSE],
-        selection = "multiple", 
+        selection = "multiple",
         options = list(pageLength = 10)
       )
-      
-      # 应用样式：根据 is_conflict 列改变行背景颜色
-      if (has_conflict) {
-        dt <- dt %>% DT::formatStyle(
-          'id', valueColumns = 'is_conflict', 
-          target = 'row',
-          backgroundColor = DT::styleEqual(c(TRUE, FALSE), c('#ffeeba', 'white')), 
-          title = DT::styleEqual(c(TRUE, FALSE), c('该父本已与选中的某位母本配过组', ''))
-        )
-      }
       
       dt
     })

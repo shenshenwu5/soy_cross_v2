@@ -165,6 +165,7 @@ get_parent_usage_stats <- function(db_path = "data/db/soy_cross.db", top_n = NUL
       females = coalesce(females, "")
     ) %>%
     select(name, id, usage_female, usage_male, usage_total, males, females) %>%
+    ungroup() %>%
     arrange(desc(usage_total))
   
   if (!is.null(top_n)) {

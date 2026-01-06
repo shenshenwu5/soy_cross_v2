@@ -20,18 +20,22 @@ parent_admin_ui <- function(id) {
       sidebarPanel(
         width = 3,
         div(class = "sidebar-scroll",
-          checkboxInput(ns("filter_active"), "仅显示活跃亲本", value = TRUE),
           textInput(ns("search_name"), "按名称搜索", ""),
-          actionButton(ns("btn_refresh"), "刷新", class = "btn-primary"),
-          hr(),
-          actionButton(ns("btn_add"), "新增", class = "btn-success"),
-          actionButton(ns("btn_edit"), "修改", class = "btn-warning"),
-          actionButton(ns("btn_soft_del"), "停用", class = "btn-danger"),
-          actionButton(ns("btn_enable"), "启用", class = "btn-success"),
-          actionButton(ns("btn_hard_del"), "物理删除", class = "btn-danger")
+          checkboxInput(ns("filter_active"), "仅显示活跃亲本", value = TRUE),
+          actionButton(ns("btn_refresh"), "刷新列表", icon = icon("sync"), class = "btn-primary btn-block", width = "100%")
         )
       ),
       mainPanel(
+        # 工具栏
+        div(style = "margin-bottom: 15px;",
+          actionButton(ns("btn_add"), "新增亲本", icon = icon("plus"), class = "btn-success"),
+          span(style = "margin-left: 10px; border-left: 1px solid #ccc; padding-left: 10px;",
+            actionButton(ns("btn_edit"), "修改", icon = icon("edit"), class = "btn-warning"),
+            actionButton(ns("btn_soft_del"), "停用", icon = icon("ban"), class = "btn-secondary"),
+            actionButton(ns("btn_enable"), "启用", icon = icon("check"), class = "btn-success"),
+            actionButton(ns("btn_hard_del"), "删除", icon = icon("trash"), class = "btn-danger")
+          )
+        ),
         DT::dataTableOutput(ns("tbl_parents"))
       )
     )
@@ -92,7 +96,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
 
     # 单一渲染出口
     output$tbl_parents <- DT::renderDataTable({
-      DT::datatable(parents_data(), selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50)))
+      DT::datatable(parents_data(), selection = "single", options = list(pageLength = 10, lengthMenu = c(10, 25, 50), autoWidth = FALSE, scrollX = TRUE))
     })
 
     observeEvent(input$btn_refresh, {

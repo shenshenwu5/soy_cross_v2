@@ -1,0 +1,340 @@
+# =============================================================================
+# 模块名称：mod_book_app.R
+# 功能描述：帐本生成模块（原 run_book_app.R 的逻辑封装）
+# =============================================================================
+
+library(shiny)
+library(DT)
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(glue)
+
+book_app_ui <- function(id) {
+  ns <- NS(id)
+  
+  tagList(
+    # CSS 已在 app.R 中全局定义，此处移除局部定义
+    
+    sidebarLayout(
+      sidebarPanel(
+        width = 3,
+        h4("参数配置"),
+        hr(),
+        
+        # 1. 批次选择
+        div(style="display: flex; align-items: flex-end;",
+            selectInput(ns("gen_batch"), "批次选择 (Batch)", choices = NULL, width = "100%"),
+            actionButton(ns("refresh_batches"), "", icon = icon("refresh"), class = "btn-info btn-sm", style="margin-bottom: 15px; margin-left: 5px;")
+        ),
+        
+        # 2. 编号参数
+        textInput(ns("gen_prefix"), "组合前缀 (Prefix)", value = "", placeholder = "必填"),
+        numericInput(ns("gen_start_n"), "起始编号 (Start N)", value = 1, min = 1),
+        numericInput(ns("gen_digits"), "编号位数 (Digits)", value = 3, min = 1),
+        
+        hr(),
+        h4("种植参数"),
+        
+        # 3. 种植参数
+        textInput(ns("gen_place"), "种植地点 (Place)", value = "", placeholder = "必填"),
+        numericInput(ns("gen_rows"), "种植行数 (Rows)", value = 2, min = 1),
+        numericInput(ns("gen_rp"), "重复数 (Replicates)", value = 1, min = 1),
+        numericInput(ns("gen_interval"), "间隔 (Interval)", value = 999, min = 1),
+        
+        hr(),
+        helpText("说明：配置好参数后，先点击'生成预览'检查数据，确认无误后再回写数据库或导出文件。")
+      ),
+      
+      mainPanel(
+        width = 9,
+        
+        # 操作按钮区
+        fluidRow(
+          column(12,
+                 actionButton(ns("btn_calc_preview"), "1. 生成预览", class = "btn-primary", icon = icon("play")),
+                 span(style = "margin: 0 10px;", "|"),
+                 actionButton(ns("btn_save_db_name"), "2. 回写数据库 (Name)", class = "btn-danger", icon = icon("database")),
+                 span(style = "margin: 0 10px;", "|"),
+                 downloadButton(ns("btn_export_xlsx"), "3. 导出 Excel 帐本", class = "btn-success")
+          )
+        ),
+        hr(),
+        
+        # 结果展示区
+        tabsetPanel(
+          tabPanel("组合预览 (Combination)", 
+                   br(),
+                   DT::dataTableOutput(ns("tbl_preview_combi"))
+          ),
+          tabPanel("排图预览 (Planting)", 
+                   br(),
+                   DT::dataTableOutput(ns("tbl_preview_plant"))
+          )
+        )
+      )
+    )
+  )
+}
+
+book_app_server <- function(id, db_path = "data/db/soy_cross.db") {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+    
+    # 确保数据库目录存在
+    if (!dir.exists(dirname(db_path))) dir.create(dirname(db_path), recursive = TRUE)
+    
+    # 存储计算结果
+    store_gen <- reactiveValues(
+      my_combi = NULL, 
+      planted = NULL
+    )
+    
+    # 1. 初始化与批次加载
+    load_batches <- function() {
+      tryCatch({
+        con <- dbConnect(SQLite(), db_path)
+        on.exit(dbDisconnect(con), add = TRUE)
+        
+        if (dbExistsTable(con, "crosses")) {
+          batches <- dbGetQuery(con, "SELECT batch FROM crosses GROUP BY batch ORDER BY MAX(rowid) DESC")
+          return(batches$batch)
+        } else {
+          return(character(0))
+        }
+      }, error = function(e) {
+        showNotification(paste("读取批次失败:", e$message), type = "error")
+        return(character(0))
+      })
+    }
+    
+    observe({
+      batches <- load_batches()
+      if (length(batches) > 0) {
+        updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
+      }
+    })
+    
+    observeEvent(input$refresh_batches, {
+      batches <- load_batches()
+      if (length(batches) > 0) {
+        updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
+        showNotification("批次列表已刷新", type = "message")
+      } else {
+        showNotification("未找到批次", type = "warning")
+      }
+    })
+    
+    # 2. 生成预览
+    observeEvent(input$btn_calc_preview, {
+      if (!nzchar(input$gen_prefix)) { showNotification("组合前缀不能为空", type = "error"); return() }
+      if (!nzchar(input$gen_place)) { showNotification("种植地点不能为空", type = "error"); return() }
+      req(input$gen_batch)
+      
+      withProgress(message = '正在计算...', value = 0, {
+        tryCatch({
+          # A. 获取原始数据
+          incProgress(0.2, detail = "获取数据库记录")
+          
+          if (exists("get_crosses_by_batch")) {
+            mycross <- get_crosses_by_batch(batch = input$gen_batch, db_path = db_path)
+          } else {
+            con <- dbConnect(SQLite(), db_path)
+            on.exit(dbDisconnect(con), add = TRUE)
+            mycross <- dbGetQuery(con, "SELECT * FROM crosses WHERE batch = ?", params = list(input$gen_batch))
+          }
+          
+          if (nrow(mycross) == 0) {
+            showNotification("该批次无数据", type = "warning")
+            return()
+          }
+          
+          # 仅保留正交记录 (is_reciprocal == 0 或 NA)
+          if ("is_reciprocal" %in% names(mycross)) {
+            mycross <- mycross[mycross$is_reciprocal == 0 | is.na(mycross$is_reciprocal), ]
+            if (nrow(mycross) == 0) {
+              showNotification("该批次无正交记录", type = "warning")
+              return()
+            }
+          }
+          
+          # B. 关联亲本信息
+          incProgress(0.4, detail = "关联亲本信息")
+          
+          if (exists("join_cross_parents")) {
+            mydata <- join_cross_parents(mycross, db_path = db_path)
+          } else {
+            con <- dbConnect(SQLite(), db_path)
+            parents <- dbGetQuery(con, "SELECT id, name FROM parents")
+            dbDisconnect(con)
+            mydata <- merge(mycross, parents, by.x="female_id", by.y="id", suffixes=c("", "_f"))
+            names(mydata)[names(mydata) == "name"] <- "female_name"
+            mydata <- merge(mydata, parents, by.x="male_id", by.y="id", suffixes=c("", "_m"))
+            names(mydata)[names(mydata) == "name"] <- "male_name"
+            mydata$ma <- mydata$male_name
+            mydata$pa <- mydata$female_name
+          }
+          
+          # C. 生成组合编号
+          incProgress(0.6, detail = "生成组合编号")
+          
+          if (exists("get_combination")) {
+            combi_input <- data.frame(
+              ma = mydata$male_name,
+              pa = mydata$female_name,
+              stringsAsFactors = FALSE
+            )
+            combi_input <- combi_input %>% arrange(desc(ma), desc(pa))
+            
+            my_combi <- get_combination(
+              combi_input,
+              prefix = input$gen_prefix,
+              startN = input$gen_start_n,
+              only = TRUE,
+              order = FALSE
+            )
+            store_gen$my_combi <- my_combi
+          } else {
+            stop("找不到 get_combination 函数")
+          }
+          
+          # D. 生成种植排图
+          incProgress(0.8, detail = "生成排图计划")
+          
+          if (exists("planting")) {
+            if (!"year" %in% names(store_gen$my_combi)) {
+              store_gen$my_combi$year <- format(Sys.Date(), "%Y")
+            }
+            planted <- planting(
+              store_gen$my_combi,
+              place = input$gen_place,
+              rows = input$gen_rows,
+              rp = input$gen_rp,
+              interval = input$gen_interval,
+              digits = input$gen_digits,
+              s_prefix = input$gen_prefix,
+              ck = NULL
+            )
+            store_gen$planted <- planted
+          } else {
+            stop("找不到 planting 函数")
+          }
+          
+          incProgress(1.0, detail = "完成")
+          showNotification("预览生成成功", type = "message")
+          
+        }, error = function(e) {
+          showNotification(paste("生成失败:", e$message), type = "error")
+        })
+      })
+    })
+    
+    # 3. 渲染表格
+    output$tbl_preview_combi <- DT::renderDataTable({
+      req(store_gen$my_combi)
+      DT::datatable(store_gen$my_combi, 
+                    options = list(
+                      pageLength = 15, 
+                      scrollX = TRUE, 
+                      dom = 'frtip',
+                      autoWidth = FALSE,
+                      columnDefs = list(list(
+                        targets = "_all",
+                        render = JS(
+                          "function(data, type, row, meta) {",
+                          "  return type === 'display' && data != null && data.length > 10 ?",
+                          "    '<span title=\"' + data + '\">' + data.substr(0, 10) + '...</span>' : data;",
+                          "}"
+                        )
+                      ))
+                    ),
+                    class = "compact stripe hover")
+    })
+    
+    output$tbl_preview_plant <- DT::renderDataTable({
+      req(store_gen$planted)
+      DT::datatable(store_gen$planted, 
+                    options = list(
+                      pageLength = 15, 
+                      scrollX = TRUE, 
+                      dom = 'frtip',
+                      autoWidth = FALSE,
+                      columnDefs = list(list(
+                        targets = "_all",
+                        render = JS(
+                          "function(data, type, row, meta) {",
+                          "  return type === 'display' && data != null && data.length > 10 ?",
+                          "    '<span title=\"' + data + '\">' + data.substr(0, 10) + '...</span>' : data;",
+                          "}"
+                        )
+                      ))
+                    ),
+                    class = "compact stripe hover")
+    })
+    
+    # 4. 回写数据库
+    observeEvent(input$btn_save_db_name, {
+      req(store_gen$my_combi)
+      showModal(modalDialog(
+        title = "确认回写数据库",
+        "确定要将生成的组合名称 (Name) 更新回数据库吗？",
+        footer = tagList(
+          modalButton("取消"),
+          actionButton(ns("confirm_save_db"), "确认更新", class = "btn-danger")
+        )
+      ))
+    })
+    
+    observeEvent(input$confirm_save_db, {
+      removeModal()
+      tryCatch({
+        if (exists("update_cross_names_from_df")) {
+          cols_to_update <- intersect(c("name", "ma", "pa"), names(store_gen$my_combi))
+          if (length(cols_to_update) == 0) stop("数据中缺少 name/ma/pa 字段")
+          update_cross_names_from_df(
+            data = store_gen$my_combi[, cols_to_update, drop=FALSE], 
+            batch = input$gen_batch,
+            db_path = db_path
+          )
+          showNotification("数据库更新成功", type = "message")
+        } else {
+          stop("找不到 update_cross_names_from_df 函数")
+        }
+      }, error = function(e) {
+        showNotification(paste("更新失败:", e$message), type = "error")
+      })
+    })
+    
+    # 5. 导出 Excel
+    output$btn_export_xlsx <- downloadHandler(
+      filename = function() { 
+        paste0("CrossBook_", input$gen_prefix, "_", input$gen_batch, ".xlsx") 
+      },
+      content = function(file) {
+        req(store_gen$my_combi, store_gen$planted)
+        tryCatch({
+          if (exists("savewb")) {
+            fields <- c("fieldid", "code", "place", "stageid", "name", "rows", "line_number", "rp")
+            myview_cols <- intersect(c(fields, "ma", "pa"), names(store_gen$planted))
+            mat <- NULL
+            if (exists("combination_matrix")) {
+              mat <- combination_matrix(store_gen$my_combi)
+            }
+            savewb(
+              origin = store_gen$my_combi,
+              planting = store_gen$planted,
+              myview = store_gen$planted[, myview_cols, drop=FALSE],
+              combi_matrix = mat,
+              filename = file,
+              overwrite = TRUE
+            )
+          } else {
+            stop("找不到 savewb 函数")
+          }
+        }, error = function(e) {
+          showNotification(paste("导出失败:", e$message), type = "error")
+        })
+      }
+    )
+  })
+}

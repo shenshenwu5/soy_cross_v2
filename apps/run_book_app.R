@@ -14,7 +14,7 @@ library(glue)
 tryCatch({
   library(soyplant)
 }, error = function(e) {
-  message("Note: soyplant package not installed or failed to load.")
+  message("Please install soyplant： devtools::install_github('zhaoqingsonga/soyplant')")
 })
 
 # 项目根目录检测

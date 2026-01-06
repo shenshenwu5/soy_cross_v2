@@ -254,7 +254,8 @@ create_cross_plan <- function(
 #' @description
 #' 根据输入的数据框批量更新 crosses 表中的 name 字段。
 #' 输入的 pa (母本) 和 ma (父本) 可以是名称或 ID，函数会自动识别并转换。
-#' 匹配规则：batch + female_id + male_id。
+#' 匹配规则：当 batch 非空时使用 batch + female_id + male_id；
+#' 当 batch 为空 (NULL 或 "") 时，在全表范围按 female_id + male_id 更新。
 #'
 #' @param data 数据框，必须包含 ma (父本), pa (母本), name (新名称) 列
 #' @param batch 字符串，目标批次名称
@@ -270,7 +271,7 @@ update_cross_names_from_df <- function(
     is_id = FALSE
 ) {
   if (missing(data) || !is.data.frame(data)) stop("❌ 参数错误：data 必须是一个数据框")
-  if (missing(batch) || !nzchar(batch)) stop("❌ 参数错误：batch 不能为空")
+  use_batch <- !(missing(batch) || is.null(batch) || !nzchar(batch))
   required_cols <- c("ma", "pa", "name")
   if (!all(required_cols %in% names(data))) {
     stop("❌ 数据框必须包含列：", paste(required_cols, collapse = ", "))
@@ -292,17 +293,14 @@ update_cross_names_from_df <- function(
     # 获取 parents 表的所有 id 和 name 映射
     parents_map <- dbGetQuery(con, "SELECT id, name FROM parents")
     
-    # 转换 pa (母本)
+    # 转换 ma (母本, Mother)
     data <- data %>%
-      left_join(parents_map, by = c("pa" = "name")) %>%
+      left_join(parents_map, by = c("ma" = "name")) %>%
       rename(female_id = id)
       
-    # 转换 ma (父本)
-    # 此时 parents_map 中的 id 列在 join 后会默认变为 id，但为了保险起见，明确指定后缀
-    # 或者，由于前一次 join 已经使用了 id 并 rename 成了 female_id，所以当前 data 中没有 id 列
-    # join 后新加入的 id 列即为 ma 的 id
+    # 转换 pa (父本, Father)
     data <- data %>%
-      left_join(parents_map, by = c("ma" = "name"))
+      left_join(parents_map, by = c("pa" = "name"))
     
     # 此时列名中应该包含 id（来自第二次 join）
     if ("id" %in% names(data)) {
@@ -328,7 +326,7 @@ update_cross_names_from_df <- function(
     }
   } else {
     data <- data %>%
-      rename(female_id = pa, male_id = ma)
+      rename(female_id = ma, male_id = pa)
   }
   
   if (nrow(data) == 0) {
@@ -337,7 +335,9 @@ update_cross_names_from_df <- function(
   }
   
   # 准备更新参数列表
-  # SQL: UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?
+  # SQL: 
+  # - 有批次：UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?
+  # - 无批次：UPDATE crosses SET name = ?, updated_at = ? WHERE female_id = ? AND male_id = ?
   current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   params_list <- list()
   
@@ -345,14 +345,23 @@ update_cross_names_from_df <- function(
   # 包含正交和反交的更新
   idx <- 1
   for (i in seq_len(nrow(data))) {
-    # 正交：输入数据中的 pa=female_id, ma=male_id
-    params_list[[idx]] <- list(
-      data$name[i],
-      current_time,
-      batch,
-      data$female_id[i], 
-      data$male_id[i]
-    )
+    # 正交：ma=female_id (Mother), pa=male_id (Father)
+    if (use_batch) {
+      params_list[[idx]] <- list(
+        data$name[i],
+        current_time,
+        batch,
+        data$female_id[i],
+        data$male_id[i]
+      )
+    } else {
+      params_list[[idx]] <- list(
+        data$name[i],
+        current_time,
+        data$female_id[i],
+        data$male_id[i]
+      )
+    }
     idx <- idx + 1
     
     # 反交：自动处理
@@ -364,18 +373,31 @@ update_cross_names_from_df <- function(
        recip_name <- paste0("R", data$name[i])
     }
     
-    params_list[[idx]] <- list(
-      recip_name,
-      current_time,
-      batch,
-      data$male_id[i],   # 反交的母本是正交的父本
-      data$female_id[i]  # 反交的父本是正交的母本
-    )
+    if (use_batch) {
+      params_list[[idx]] <- list(
+        recip_name,
+        current_time,
+        batch,
+        data$male_id[i],   # 反交的母本是正交的父本
+        data$female_id[i]  # 反交的父本是正交的母本
+      )
+    } else {
+      params_list[[idx]] <- list(
+        recip_name,
+        current_time,
+        data$male_id[i],   # 反交的母本是正交的父本
+        data$female_id[i]  # 反交的父本是正交的母本
+      )
+    }
     idx <- idx + 1
   }
   
   # 使用事务批量执行
-  sql <- "UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?"
+  sql <- if (use_batch) {
+    "UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?"
+  } else {
+    "UPDATE crosses SET name = ?, updated_at = ? WHERE female_id = ? AND male_id = ?"
+  }
   
   total_updated <- 0
   dbBegin(con)

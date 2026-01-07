@@ -47,7 +47,7 @@ if (file.exists(file.path(project_root, "R", "mod_analysis.R"))) {
 
 # 业务功能模块
 source(file.path(project_root, "R", "mod_parent.R"))      # 亲本管理
-source(file.path(project_root, "R", "mod_cross_app.R"))   # 杂交计划
+source(file.path(project_root, "R", "mod_cross_app.R"))   # 杂交配置
 source(file.path(project_root, "R", "mod_book_app.R"))    # 帐本生成
 source(file.path(project_root, "R", "mod_matrix.R"))      # 矩阵视图
 source(file.path(project_root, "R", "mod_analysis_app.R")) # 统计分析
@@ -104,8 +104,8 @@ ui <- navbarPage(
     parent_admin_ui("parent_mod")
   ),
   
-  # 2. 杂交计划
-  tabPanel("杂交计划",
+  # 2. 杂交配置
+  tabPanel("杂交配置",
     icon = icon("random"),
     cross_app_ui("cross_mod")
   ),
@@ -152,7 +152,7 @@ server <- function(input, output, session) {
   # 1. 亲本管理
   parent_admin_server("parent_mod", db_path = db_path)
   
-  # 2. 杂交计划
+  # 2. 杂交配置
   cross_app_server("cross_mod", db_path = db_path)
   
   # 3. 帐本生成

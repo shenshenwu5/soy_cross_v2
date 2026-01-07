@@ -151,11 +151,15 @@ fill_matrix_data <- function(
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
+  info <- dbGetQuery(con, "PRAGMA table_info(crosses)")
+  has_recip <- any(info$name == "is_reciprocal")
+  sel_cols <- "female_id, male_id, batch, status, seed_count, name"
+  if (has_recip) sel_cols <- paste(sel_cols, ", is_reciprocal")
+  
   # === 构建查询 ===
   message("🔍 正在查询杂交组合数据...")
   
-  sql <- "SELECT female_id, male_id, batch, status, seed_count, is_reciprocal, name 
-          FROM crosses WHERE 1=1"
+  sql <- paste0("SELECT ", sel_cols, " FROM crosses WHERE 1=1")
   
   params <- list()
   
@@ -167,7 +171,7 @@ fill_matrix_data <- function(
   }
   
   # 添加反交过滤
-  if (!show_reciprocal) {
+  if (!show_reciprocal && has_recip) {
     sql <- paste0(sql, " AND is_reciprocal = 0")
   }
   
@@ -408,6 +412,15 @@ matrix_view_ui <- function(id) {
           selected = "batch"
         ),
         
+        selectInput(
+          ns("batch_filter"),
+          "批次选择：",
+          choices = NULL,
+          selected = NULL,
+          multiple = FALSE,
+          width = "100%"
+        ),
+        
         checkboxInput(
           ns("show_reciprocal"),
           "显示反交",
@@ -467,35 +480,82 @@ matrix_view_ui <- function(id) {
 matrix_view_server <- function(id, db_path = "data/db/soy_cross.db") {
   moduleServer(id, function(input, output, session) {
     
+    load_batches <- function() {
+      tryCatch({
+        con <- dbConnect(SQLite(), db_path)
+        on.exit(dbDisconnect(con), add = TRUE)
+        if (dbExistsTable(con, "crosses")) {
+          batches <- dbGetQuery(con, "SELECT batch FROM crosses GROUP BY batch ORDER BY MAX(rowid) DESC")
+          batches$batch
+        } else {
+          character(0)
+        }
+      }, error = function(e) {
+        character(0)
+      })
+    }
+    
+    observe({
+      batches <- load_batches()
+      if (length(batches) > 0) {
+        updateSelectInput(session, "batch_filter", choices = c("全部批次" = "__ALL__", batches), selected = "__ALL__")
+      }
+    })
+    
     # === 响应式数据 ===
     matrix_data <- reactive({
-      # 触发刷新
       input$refresh
+      input$filter_active
+      input$name_field
+      input$fill_value
+      input$show_reciprocal
+      input$batch_filter
+      mat <- create_cross_matrix_view(
+        db_path = db_path,
+        filter_active = input$filter_active,
+        name_field = input$name_field,
+        fill_value = input$fill_value,
+        batch_filter = if (!is.null(input$batch_filter) && nzchar(input$batch_filter) && input$batch_filter != "__ALL__") input$batch_filter else NULL,
+        show_reciprocal = input$show_reciprocal
+      )
       
-      # 创建矩阵视图
-      isolate({
-        create_cross_matrix_view(
-          db_path = db_path,
-          filter_active = input$filter_active,
-          name_field = input$name_field,
-          fill_value = input$fill_value,
-          show_reciprocal = input$show_reciprocal
-        )
-      })
+      if (!is.null(dim(mat)) && nrow(mat) > 0 && ncol(mat) > 0) {
+        row_keep <- apply(mat, 1, function(r) any(nzchar(r)))
+        col_keep <- apply(mat, 2, function(c) any(nzchar(c)))
+        mat <- mat[row_keep, col_keep, drop = FALSE]
+      }
+      
+      mat
     })
     
     # === 渲染矩阵表格 ===
     output$matrix_table <- renderRHandsontable({
       mat <- matrix_data()
-      
-      rhandsontable(mat, readOnly = TRUE) %>%
-        hot_cols(columnSorting = FALSE) %>%
-        hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE)
+      if (is.null(dim(mat)) || nrow(mat) == 0 || ncol(mat) == 0) return(NULL)
+      rn <- rownames(mat)
+      max_rn <- if (length(rn) > 0) suppressWarnings(max(nchar(rn), na.rm = TRUE)) else 0
+      row_hdr_w <- max(140, min(400, max_rn * 10))
+      c1_vals <- mat[, 1, drop = TRUE]
+      max_c1 <- suppressWarnings(max(nchar(c1_vals), na.rm = TRUE))
+      colw <- rep(100, ncol(mat))
+      colw[1] <- max(140, min(300, max_c1 * 9))
+      ht <- rhandsontable(mat, readOnly = TRUE)
+      ht <- hot_cols(ht, columnSorting = FALSE, colWidths = colw)
+      ht <- hot_table(ht, rowHeaderWidth = row_hdr_w)
+      ht <- hot_context_menu(ht, allowRowEdit = FALSE, allowColEdit = FALSE)
+      ht
     })
     
     # === 渲染数据表格 ===
     output$data_table <- DT::renderDataTable({
       mat <- matrix_data()
+      if (is.null(dim(mat)) || nrow(mat) == 0 || ncol(mat) == 0) {
+        return(DT::datatable(
+          data.frame(母本=character(0), 父本=character(0), 信息=character(0)),
+          options = list(pageLength = 20, searching = TRUE, ordering = TRUE),
+          rownames = FALSE
+        ))
+      }
       
       # 转换为长格式
       mat_df <- as.data.frame(mat, stringsAsFactors = FALSE)
@@ -505,9 +565,9 @@ matrix_view_server <- function(id, db_path = "data/db/soy_cross.db") {
         mat_df,
         cols = -母本,
         names_to = "父本",
-        values_to = "信息"
+        values_to = "批次"
       ) %>%
-        filter(nzchar(信息))
+        filter(nzchar(批次))
       
       DT::datatable(
         mat_long,

@@ -79,6 +79,29 @@ ui <- navbarPage("杂交组合配置", id = "steps",
             border: 1px solid #ccc !important;
             padding: 2px 5px !important;
         }
+        /* Ensure column filter inputs show typed text clearly */
+        table.dataTable thead th input[type='text'],
+        table.dataTable thead td input[type='text'] {
+            color: #111 !important;
+            background-color: #fff !important;
+            border: 1px solid #999 !important;
+            width: 100% !important;
+            min-width: 80px !important;
+            height: 24px !important;
+            padding: 2px 6px !important;
+            box-sizing: border-box !important;
+        }
+        table.dataTable thead th select,
+        table.dataTable thead td select {
+            color: #111 !important;
+            background-color: #fff !important;
+            border: 1px solid #999 !important;
+            width: 100% !important;
+            min-width: 80px !important;
+            height: 24px !important;
+            padding: 2px 6px !important;
+            box-sizing: border-box !important;
+        }
       "))),
       div(style = 'overflow-x: hidden;', rHandsontableOutput("matrix")),
       verbatimTextOutput("matrix_summary"),
@@ -131,12 +154,61 @@ server <- function(input, output, session) {
   # A 母本
   output$tbl_females <- DT::renderDataTable({
     df <- parents(); cols <- get_display_cols(df)
+    d <- df[, cols, drop=FALSE]
+    d[] <- lapply(d, function(x) if (is.factor(x)) as.character(x) else x)
+    num_idx <- which(sapply(d, is.numeric)) - 1L
+    char_idx <- which(!sapply(d, is.numeric)) - 1L
     DT::datatable(
-      df[, cols, drop=FALSE], 
-      selection = "multiple", 
-      filter = "top", 
+      d,
+      selection = "multiple",
+      filter = "top",
       class = "compact stripe hover",
-      options = list(pageLength=20, scrollY = '60vh', scrollCollapse = TRUE, searchHighlight = TRUE)
+      extensions = c("SearchPanes", "SearchBuilder"),
+      options = list(
+        pageLength = 20,
+        scrollY = "60vh",
+        scrollCollapse = TRUE,
+        searchHighlight = TRUE,
+        dom = "Plfrtip",
+        columnDefs = list(
+          list(searchPanes = list(show = TRUE), targets = char_idx),
+          list(searchPanes = list(show = FALSE), targets = num_idx)
+        ),
+        search = list(regex = TRUE, smart = TRUE),
+        initComplete = DT::JS(paste0(
+          "function() {",
+          "  var api = this.api();",
+          "  var table = api.table().node();",
+          "  var $table = $(table);",
+          "  var filterRow = $table.find('thead tr').eq(1);",
+          "  if (filterRow.length === 0) { return; }",
+          "  var charIdx = ", "[", paste(char_idx, collapse = ","), "]", ";",
+          "  var numIdx = ", "[", paste(num_idx, collapse = ","), "]", ";",
+          "  api.columns().every(function(){",
+          "    var col = this;",
+          "    var idx = col.index();",
+          "    if (charIdx.indexOf(idx) !== -1 || numIdx.indexOf(idx) !== -1) {",
+          "      var cell = filterRow.find('th').eq(idx);",
+          "      cell.empty();",
+          "      var select = $('<select class=\"dt-col-filter\"><option value=\"\">All</option></select>')",
+          "        .appendTo(cell)",
+          "        .on('change', function(){",
+          "          var val = $(this).val();",
+          "          if (val) {",
+          "            col.search('^' + $.fn.dataTable.util.escapeRegex(val) + '$', true, false).draw();",
+          "          } else {",
+          "            col.search('', true, false).draw();",
+          "          }",
+          "        });",
+          "      col.data().unique().sort().each(function(d){",
+          "        if (d === null) d = '';",
+          "        select.append('<option value=\"' + d + '\">' + d + '</option>');",
+          "      });",
+          "    }",
+          "  });",
+          "}"
+        ))
+      )
     )
   })
   observeEvent(input$confirm_females, {

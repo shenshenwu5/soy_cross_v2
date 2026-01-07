@@ -101,7 +101,7 @@ ui <- fluidPage(
         column(12,
                actionButton("btn_calc_preview", "1. 生成预览", class = "btn-primary", icon = icon("play")),
                span(style = "margin: 0 10px;", "|"),
-               actionButton("btn_save_db_name", "2. 回写数据库 (Name)", class = "btn-danger", icon = icon("database")),
+               actionButton("btn_save_db_name", "2. 填写杂交名称", class = "btn-danger", icon = icon("database")),
                span(style = "margin: 0 10px;", "|"),
                downloadButton("btn_export_xlsx", "3. 导出 Excel 帐本", class = "btn-success")
         )
@@ -114,7 +114,7 @@ ui <- fluidPage(
                  br(),
                  DT::dataTableOutput("tbl_preview_combi")
         ),
-        tabPanel("排图预览 (Planting)", 
+        tabPanel("种植预览 (Planting)", 
                  br(),
                  DT::dataTableOutput("tbl_preview_plant")
         )

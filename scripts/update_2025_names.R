@@ -16,7 +16,7 @@ db_path <- file.path(project_root, "data", "db", "soy_cross.db")
 source(file.path(project_root, "R", "mod_cross.R"))
 
 # 目标数据目录
-target_dir <- file.path(project_root, "2024cross")
+target_dir <- file.path(project_root, "2025cross")
 
 # === 2. 执行批量更新 ===
 

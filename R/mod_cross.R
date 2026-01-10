@@ -141,13 +141,14 @@ create_cross_plan <- function(
         id = generate_cross_id(female_id, male_id),
         batch = batch_name,
         name = paste0(female_id, "-", male_id),
+        memo = NA_character_,
         seed_count = NA_integer_,
         is_reciprocal = 0L,
         status = status,
         created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
         updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
       ) %>%
-      select(id, female_id, male_id, batch, name, seed_count, 
+      select(id, female_id, male_id, batch, name, memo, seed_count, 
              is_reciprocal, status, created_at, updated_at)
     
     # 插入数据库
@@ -172,6 +173,7 @@ create_cross_plan <- function(
           id = generate_cross_id(male_id, female_id),
           batch = batch_name,
           name = paste0(male_id, "-", female_id),
+          memo = NA_character_,
           seed_count = NA_integer_,
           is_reciprocal = 1L,
           status = status,
@@ -179,7 +181,7 @@ create_cross_plan <- function(
           updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
         ) %>%
         rename(female_id = male_id, male_id = female_id) %>%
-        select(id, female_id, male_id, batch, name, seed_count, 
+        select(id, female_id, male_id, batch, name, memo, seed_count, 
                is_reciprocal, status, created_at, updated_at)
       
       # 检查反交是否已存在
@@ -595,7 +597,8 @@ create_specific_cross_plan <- function(
     db_path = "data/db/soy_cross.db",
     include_reciprocal = TRUE,
     limit = NA,
-    status = "planned"
+    status = "planned",
+    memo = ""
 ) {
   if (missing(batch_name) || !nzchar(batch_name)) stop("❌ 参数错误：batch_name 不能为空")
   if (missing(pairs) || !is.data.frame(pairs)) stop("❌ 参数错误：pairs 必须是数据框")
@@ -633,12 +636,13 @@ create_specific_cross_plan <- function(
     id = generate_cross_id(female_id, male_id),
     batch = batch_name,
     name = paste0(female_id, "-", male_id),
+    memo = as.character(memo),
     seed_count = NA_integer_,
     is_reciprocal = 0L,
     status = status,
     created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  ) %>% select(id, female_id, male_id, batch, name, seed_count, is_reciprocal, status, created_at, updated_at)
+  ) %>% select(id, female_id, male_id, batch, name, memo, seed_count, is_reciprocal, status, created_at, updated_at)
 
   # 5. 处理反交
   recip_to_insert_df <- data.frame()
@@ -663,12 +667,13 @@ create_specific_cross_plan <- function(
         id = generate_cross_id(female_id, male_id),
         batch = batch_name,
         name = paste0(female_id, "-", male_id),
+        memo = as.character(memo),
         seed_count = NA_integer_,
         is_reciprocal = 1L,
         status = status,
         created_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
         updated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-      ) %>% select(id, female_id, male_id, batch, name, seed_count, is_reciprocal, status, created_at, updated_at)
+      ) %>% select(id, female_id, male_id, batch, name, memo, seed_count, is_reciprocal, status, created_at, updated_at)
       
       recip_skipped_df <- recip_skipped_temp
     }

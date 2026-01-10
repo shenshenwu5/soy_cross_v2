@@ -52,6 +52,7 @@ cross_app_ui <- function(id) {
           div(style = 'overflow-x: hidden;', rHandsontableOutput(ns("matrix"))),
           verbatimTextOutput(ns("matrix_summary")),
           textInput(ns("batch"), "批次名", value = format(Sys.Date(), "%Y春季")),
+          textInput(ns("memo"), "组合特点（可选）", value = ""),
           numericInput(ns("limit"), "生成数量 (可选)", value = NA, min = 1),
           actionButton(ns("run_write"), "写入数据库", class = "btn-danger"),
           verbatimTextOutput(ns("run_summary")),
@@ -395,7 +396,8 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
           pairs = pairs,
           db_path = db_path,
           include_reciprocal = TRUE,
-          limit = input$limit
+          limit = input$limit,
+          memo = input$memo
         )
         output$run_summary <- renderText(glue(
           "写入成功：正交 {res$summary$inserted_n}，反交 {res$summary$reciprocal_added}，总计 {res$summary$total_inserted}；",

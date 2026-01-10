@@ -1,3 +1,5 @@
 "timestamp","operation","batch","inserted","reciprocal","total","skipped_direct","skipped_recip","mothers_used","fathers_used","status","message","user"
 "2026-01-10 20:38:56","matrix_write","2026春季",7,7,14,0,0,"P0003;P0006;P0011;P0014","P0002;P0013;P0019","success","","zhaoq"
 "2026-01-10 20:43:39","matrix_write","2026春季",4,4,8,0,0,"平豆2号;宿豆051;皖豆37","洛豆1号;南农47","success","","zhaoq"
+"2026-01-10 21:09:39","matrix_write","2026春季",3,3,6,0,0,"金豆99;宿豆051","冀豆33;平豆2号","success","","zhaoq"
+"2026-01-10 21:11:24","matrix_write","2026春季",27,27,54,0,0,"冀豆12;冀豆33;南夏豆25;圣豆29;涡豆5;浙春豆2018;中黄13","冀豆12;南夏豆25;圣豆29;浙春豆2018;中黄13","success","","zhaoq"

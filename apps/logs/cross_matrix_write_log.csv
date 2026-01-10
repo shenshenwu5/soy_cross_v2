@@ -1,0 +1,3 @@
+"timestamp","operation","batch","inserted","reciprocal","total","skipped_direct","skipped_recip","mothers_used","fathers_used","status","message","user"
+"2026-01-10 20:38:56","matrix_write","2026春季",7,7,14,0,0,"P0003;P0006;P0011;P0014","P0002;P0013;P0019","success","","zhaoq"
+"2026-01-10 20:43:39","matrix_write","2026春季",4,4,8,0,0,"平豆2号;宿豆051;皖豆37","洛豆1号;南农47","success","","zhaoq"

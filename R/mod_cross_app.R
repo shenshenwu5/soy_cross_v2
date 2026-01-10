@@ -96,6 +96,45 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
     
     refresh_key <- reactiveVal(0)
     new_batch_to_select <- reactiveVal(NULL)
+    ensure_log <- function() {
+      d <- file.path(getwd(), "logs")
+      if (!dir.exists(d)) dir.create(d, showWarnings = FALSE)
+      file.path(d, "cross_matrix_write_log.csv")
+    }
+    log_write <- function(batch, inserted, reciprocal, total, skipped_direct, skipped_recip, status = "success", message = "", mothers_used = "", fathers_used = "") {
+      f <- ensure_log()
+      entry <- data.frame(
+        timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        operation = "matrix_write",
+        batch = as.character(batch),
+        inserted = as.integer(inserted),
+        reciprocal = as.integer(reciprocal),
+        total = as.integer(total),
+        skipped_direct = as.integer(skipped_direct),
+        skipped_recip = as.integer(skipped_recip),
+        mothers_used = as.character(mothers_used),
+        fathers_used = as.character(fathers_used),
+        status = as.character(status),
+        message = as.character(message),
+        user = Sys.info()[["user"]],
+        stringsAsFactors = FALSE
+      )
+      utils::write.table(entry, f, sep = ",", row.names = FALSE, col.names = !file.exists(f), append = TRUE, fileEncoding = "UTF-8")
+    }
+    ids_to_names <- function(ids) {
+      ids <- unique(as.character(ids))
+      ids <- ids[nzchar(ids)]
+      if (length(ids) == 0) return(character(0))
+      con <- dbConnect(RSQLite::SQLite(), db_path)
+      on.exit(dbDisconnect(con), add = TRUE)
+      in_clause <- paste(sprintf("'%s'", ids), collapse = ",")
+      sql <- paste0("SELECT id, name FROM parents WHERE id IN (", in_clause, ")")
+      df <- DBI::dbGetQuery(con, sql)
+      if (nrow(df) == 0) return(character(0))
+      m <- setNames(df$name, df$id)
+      out <- m[ids[ids %in% names(m)]]
+      unname(out)
+    }
     fetch_parents <- function() {
       con <- dbConnect(SQLite(), db_path)
       on.exit(dbDisconnect(con), add = TRUE)
@@ -370,14 +409,50 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
         })
         if (res$db_updated) {
           showNotification("写入成功", type="message")
+          log_write(
+            batch = input$batch,
+            inserted = res$summary$inserted_n[1],
+            reciprocal = res$summary$reciprocal_added[1],
+            total = res$summary$total_inserted[1],
+            skipped_direct = res$summary$skipped_direct[1],
+            skipped_recip = res$summary$skipped_recip[1],
+            status = "success",
+            message = "",
+            mothers_used = paste(sort(unique(ids_to_names(pairs$female_id))), collapse = ";"),
+            fathers_used = paste(sort(unique(ids_to_names(pairs$male_id))), collapse = ";")
+          )
           load_batches()
           new_batch_to_select(input$batch)
         } else {
           showNotification("未写入任何数据（可能全部已存在）", type="warning")
+          log_write(
+            batch = input$batch,
+            inserted = res$summary$inserted_n[1],
+            reciprocal = res$summary$reciprocal_added[1],
+            total = res$summary$total_inserted[1],
+            skipped_direct = res$summary$skipped_direct[1],
+            skipped_recip = res$summary$skipped_recip[1],
+            status = "nochange",
+            message = "all existing",
+            mothers_used = paste(sort(unique(ids_to_names(pairs$female_id))), collapse = ";"),
+            fathers_used = paste(sort(unique(ids_to_names(pairs$male_id))), collapse = ";")
+          )
         }
       }, error = function(e) {
         output$run_summary <- renderText(paste("错误：", e$message))
         showNotification(paste("写入失败：", e$message), type="error")
+        log_write(
+          batch = input$batch,
+          inserted = 0,
+          reciprocal = 0,
+          total = 0,
+          skipped_direct = 0,
+          skipped_recip = 0,
+          status = "error",
+          message = e$message,
+          mothers_used = paste(sort(unique(ids_to_names(pairs$female_id))), collapse = ";"),
+          fathers_used = paste(sort(unique(ids_to_names(pairs$male_id))), collapse = ";")
+        )
       })
     })
 

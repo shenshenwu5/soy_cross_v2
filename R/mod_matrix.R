@@ -502,6 +502,22 @@ matrix_view_server <- function(id, db_path = "data/db/soy_cross.db") {
       }
     })
     
+    batches_rx <- reactivePoll(2000, session, function() {
+      suppressWarnings(file.info(db_path)$mtime)
+    }, function() {
+      load_batches()
+    })
+    
+    observeEvent(batches_rx(), {
+      batches <- batches_rx()
+      if (length(batches) > 0) {
+        curr <- isolate(input$batch_filter)
+        all_choice <- c("全部批次" = "__ALL__", batches)
+        selected <- if (!is.null(curr) && curr %in% all_choice) curr else "__ALL__"
+        updateSelectInput(session, "batch_filter", choices = all_choice, selected = selected)
+      }
+    })
+    
     # === 响应式数据 ===
     matrix_data <- reactive({
       input$refresh

@@ -542,6 +542,14 @@ server <- function(input, output, session) {
       
       if (res$db_updated) {
         showNotification("写入成功", type="message")
+        load_batches()
+        df <- batches_df()
+        if (!is.null(df) && nrow(df) > 0) {
+          choices <- df$batch
+          selected <- if (!is.null(input$batch) && input$batch %in% choices) input$batch else choices[1]
+          updateSelectInput(session, "gen_batch", choices = choices, selected = selected)
+        }
+        new_batch_to_select(input$batch)
       } else {
         showNotification("未写入任何数据（可能全部已存在）", type="warning")
       }
@@ -590,6 +598,40 @@ server <- function(input, output, session) {
   
   observeEvent(input$refresh_batches, {
     load_batches()
+  })
+  
+  batches_rx <- reactivePoll(2000, session, function() {
+    con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+    if (!DBI::dbExistsTable(con, "crosses")) return("")
+    val <- DBI::dbGetQuery(con, "SELECT MAX(updated_at) AS t FROM crosses")$t
+    if (length(val) == 0 || is.na(val)) "" else as.character(val[1])
+  }, function() {
+    tryCatch({
+      if (exists("summarize_cross_batches_db")) {
+        summarize_cross_batches_db(db_path = db_path)
+      } else {
+        con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+        on.exit(DBI::dbDisconnect(con), add = TRUE)
+        DBI::dbGetQuery(con, "
+          SELECT 
+            batch,
+            COUNT(*) as total_crosses,
+            SUM(CASE WHEN is_reciprocal = 0 THEN 1 ELSE 0 END) as direct_crosses,
+            SUM(CASE WHEN is_reciprocal = 1 THEN 1 ELSE 0 END) as reciprocal_crosses,
+            MAX(updated_at) as last_updated
+          FROM crosses
+          GROUP BY batch ORDER BY last_updated DESC
+        ")
+      }
+    }, error = function(e) {
+      data.frame()
+    })
+  })
+  
+  observeEvent(batches_rx(), {
+    df <- batches_rx()
+    if (is.data.frame(df)) batches_df(df)
   })
   
   # 渲染批次列表
@@ -684,15 +726,21 @@ server <- function(input, output, session) {
   observe({
     df_b <- batches_df()
     if (!is.null(df_b) && nrow(df_b) > 0) {
-      # 保持当前选择（如果存在）
-      curr <- isolate(input$gen_batch)
       choices <- df_b$batch
-      selected <- if (!is.null(curr) && curr %in% choices) curr else choices[1]
-      updateSelectInput(session, "gen_batch", choices = choices, selected = selected)
+      prefer <- new_batch_to_select()
+      if (!is.null(prefer) && prefer %in% choices) {
+        updateSelectInput(session, "gen_batch", choices = choices, selected = prefer)
+        new_batch_to_select(NULL)
+      } else {
+        curr <- isolate(input$gen_batch)
+        selected <- if (!is.null(curr) && curr %in% choices) curr else choices[1]
+        updateSelectInput(session, "gen_batch", choices = choices, selected = selected)
+      }
     }
   })
   
   store_gen <- reactiveValues(my_combi = NULL, planted = NULL)
+  new_batch_to_select <- reactiveVal(NULL)
   
   # 生成预览
   observeEvent(input$btn_calc_preview, {

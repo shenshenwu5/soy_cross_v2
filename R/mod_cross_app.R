@@ -95,6 +95,7 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
     # (在 module 中 source 可能会有路径问题，最好由主程序统一加载，这里假设环境中有这些函数)
     
     refresh_key <- reactiveVal(0)
+    new_batch_to_select <- reactiveVal(NULL)
     fetch_parents <- function() {
       con <- dbConnect(SQLite(), db_path)
       on.exit(dbDisconnect(con), add = TRUE)
@@ -369,6 +370,8 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
         })
         if (res$db_updated) {
           showNotification("写入成功", type="message")
+          load_batches()
+          new_batch_to_select(input$batch)
         } else {
           showNotification("未写入任何数据（可能全部已存在）", type="warning")
         }
@@ -406,6 +409,36 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
     
     observe({ load_batches() })
     observeEvent(input$refresh_batches, { load_batches() })
+    
+    batches_rx <- reactivePoll(2000, session, function() {
+      suppressWarnings(file.info(db_path)$mtime)
+    }, function() {
+      tryCatch({
+        if (exists("summarize_cross_batches_db")) {
+          summarize_cross_batches_db(db_path = db_path)
+        } else {
+          con <- dbConnect(SQLite(), db_path)
+          on.exit(dbDisconnect(con), add = TRUE)
+          dbGetQuery(con, "
+            SELECT 
+              batch,
+              COUNT(*) as total_crosses,
+              SUM(CASE WHEN is_reciprocal = 0 THEN 1 ELSE 0 END) as direct_crosses,
+              SUM(CASE WHEN is_reciprocal = 1 THEN 1 ELSE 0 END) as reciprocal_crosses,
+              MAX(updated_at) as last_updated
+            FROM crosses
+            GROUP BY batch ORDER BY last_updated DESC
+          ")
+        }
+      }, error = function(e) {
+        data.frame()
+      })
+    })
+    
+    observeEvent(batches_rx(), {
+      df <- batches_rx()
+      if (is.data.frame(df)) batches_df(df)
+    })
     
     output$batch_list_table <- DT::renderDataTable({
       df <- batches_df()
@@ -475,6 +508,22 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
       }, error = function(e) {
         showNotification(paste("删除失败:", e$message), type = "error")
       })
+    })
+    
+    observe({
+      df_b <- batches_df()
+      if (!is.null(df_b) && nrow(df_b) > 0) {
+        choices <- df_b$batch
+        prefer <- new_batch_to_select()
+        if (!is.null(prefer) && prefer %in% choices) {
+          updateSelectInput(session, "gen_batch", choices = choices, selected = prefer)
+          new_batch_to_select(NULL)
+        } else {
+          curr <- isolate(input$gen_batch)
+          selected <- if (!is.null(curr) && curr %in% choices) curr else choices[1]
+          updateSelectInput(session, "gen_batch", choices = choices, selected = selected)
+        }
+      }
     })
   })
 }

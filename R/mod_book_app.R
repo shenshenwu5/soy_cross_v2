@@ -115,6 +115,26 @@ book_app_server <- function(id, db_path = "data/db/soy_cross.db") {
       }
     })
     
+    batches_rx <- reactivePoll(2000, session, function() {
+      con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+      on.exit(DBI::dbDisconnect(con), add = TRUE)
+      if (!DBI::dbExistsTable(con, "crosses")) return("none|0|0")
+      info <- DBI::dbGetQuery(con, "SELECT MAX(updated_at) AS t, COUNT(*) AS n, MAX(rowid) AS rid FROM crosses")
+      t <- if (length(info$t) == 0 || is.na(info$t[1])) "" else as.character(info$t[1])
+      n <- if (length(info$n) == 0 || is.na(info$n[1])) 0 else as.integer(info$n[1])
+      rid <- if (length(info$rid) == 0 || is.na(info$rid[1])) 0 else as.integer(info$rid[1])
+      paste0(t, "|", n, "|", rid)
+    }, function() {
+      load_batches()
+    })
+    
+    observeEvent(batches_rx(), {
+      batches <- batches_rx()
+      if (length(batches) > 0) {
+        updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
+      }
+    })
+    
     observeEvent(input$refresh_batches, {
       batches <- load_batches()
       if (length(batches) > 0) {

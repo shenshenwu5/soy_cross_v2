@@ -167,6 +167,37 @@ server <- function(input, output, session) {
     }
   })
   
+  batches_rx <- reactivePoll(2000, session, function() {
+    con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+    if (!DBI::dbExistsTable(con, "crosses")) return("none|0|0")
+    info <- DBI::dbGetQuery(con, "SELECT MAX(updated_at) AS t, COUNT(*) AS n, MAX(rowid) AS rid FROM crosses")
+    t <- if (length(info$t) == 0 || is.na(info$t[1])) "" else as.character(info$t[1])
+    n <- if (length(info$n) == 0 || is.na(info$n[1])) 0 else as.integer(info$n[1])
+    rid <- if (length(info$rid) == 0 || is.na(info$rid[1])) 0 else as.integer(info$rid[1])
+    paste0(t, "|", n, "|", rid)
+  }, function() {
+    tryCatch({
+      con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+      on.exit(DBI::dbDisconnect(con), add = TRUE)
+      if (DBI::dbExistsTable(con, "crosses")) {
+        df <- DBI::dbGetQuery(con, "SELECT batch FROM crosses GROUP BY batch ORDER BY MAX(rowid) DESC")
+        df$batch
+      } else {
+        character(0)
+      }
+    }, error = function(e) {
+      character(0)
+    })
+  })
+  
+  observeEvent(batches_rx(), {
+    batches <- batches_rx()
+    if (length(batches) > 0) {
+      updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
+    }
+  })
+  
   # ---------------------------------------------------------------------------
   # 2. 生成预览 (Calculation)
   # ---------------------------------------------------------------------------

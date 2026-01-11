@@ -8,39 +8,17 @@ SoyCross <- new.env(parent = emptyenv())
 SoyCross$config <- list(
   paths = list(
     db_path = "data/db/soy_cross.db",
-    backup_dir = "data/db",
-    output_dir = "output",
-    logs_dir = "logs"
+    backup_dir = "data/db"
   ),
   sqlite = list(
     busy_timeout_ms = 10000,
     enable_foreign_keys = TRUE
   ),
-  cross = list(
-    id_rule = "{female_id}_{male_id}",
-    name_rule = "{female_id}-{male_id}",
-    unique_keys = c("female_id", "male_id", "batch")
-  ),
-  field = list(
-    plot_code_pattern = "{batch}-{seq}",
-    default_layout = list(
-      beds = 10,
-      rows_per_bed = 20,
-      replicates = 1,
-      start_seq = 1
-    ),
-    label_include = c("plot_code", "name", "female_id", "male_id", "batch")
-  ),
-  analysis = list(
-    top_n_parents = 20
-  ),
-  io = list(
-    default_export_format = "xlsx",
-    overwrite = FALSE
-  ),
-  safety = list(
-    auto_backup = TRUE
-  )
+  cross = list(),
+  field = list(),
+  analysis = list(),
+  io = list(),
+  safety = list()
 )
 
 SoyCross$db_connect <- function() {

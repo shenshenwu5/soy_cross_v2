@@ -10,6 +10,29 @@ library(RSQLite)
 library(dplyr)
 library(glue)
 
+# 加载配置
+tryCatch({
+  # 尝从项目根目录加载配置
+  proj_root <- getwd()
+  config_path <- file.path(proj_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  } else {
+    # 如果不在项目根目录，尝试向上查找
+    for (i in 1:3) {
+      proj_root <- dirname(proj_root)
+      config_path <- file.path(proj_root, "config", "config.R")
+      if (file.exists(config_path)) {
+        source(config_path)
+        break
+      }
+    }
+  }
+}, error = function(e) {
+  # 如果配置文件不存在，使用默认值
+  message("配置文件未找到，使用默认值")
+})
+
 book_app_ui <- function(id) {
   ns <- NS(id)
   
@@ -29,18 +52,18 @@ book_app_ui <- function(id) {
         ),
         
         # 2. 编号参数
-        textInput(ns("gen_prefix"), "组合前缀 (Prefix)", value = "", placeholder = "必填"),
-        numericInput(ns("gen_start_n"), "起始编号 (Start N)", value = 1, min = 1),
-        numericInput(ns("gen_digits"), "编号位数 (Digits)", value = 3, min = 1),
+        textInput(ns("gen_prefix"), "组合前缀 (Prefix)", value = format(Sys.Date(), SoyCross$config$field$default_prefix), placeholder = "必填"),
+        numericInput(ns("gen_start_n"), "起始编号 (Start N)", value = SoyCross$config$field$default_start_n, min = 1),
+        numericInput(ns("gen_digits"), "编号位数 (Digits)", value = SoyCross$config$field$default_digits, min = 1),
         
         hr(),
         h4("种植参数"),
         
         # 3. 种植参数
-        textInput(ns("gen_place"), "种植地点 (Place)", value = "", placeholder = "必填"),
-        numericInput(ns("gen_rows"), "种植行数 (Rows)", value = 2, min = 1),
-        numericInput(ns("gen_rp"), "重复数 (Replicates)", value = 1, min = 1),
-        numericInput(ns("gen_interval"), "间隔 (Interval)", value = 999, min = 1),
+        textInput(ns("gen_place"), "种植地点 (Place)", value = SoyCross$config$field$default_place, placeholder = "必填"),
+        numericInput(ns("gen_rows"), "种植行数 (Rows)", value = SoyCross$config$field$default_rows, min = 1),
+        numericInput(ns("gen_rp"), "重复数 (Replicates)", value = SoyCross$config$field$default_rp, min = 1),
+        numericInput(ns("gen_interval"), "间隔 (Interval)", value = SoyCross$config$field$default_interval, min = 1),
         
         hr(),
         helpText("说明：配置好参数后，先点击'生成预览'检查数据，确认无误后再回写数据库或导出文件。")

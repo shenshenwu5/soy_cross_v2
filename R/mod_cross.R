@@ -9,6 +9,29 @@ library(DBI)
 library(dplyr)
 library(glue)
 
+# 加载配置
+tryCatch({
+  # 尝试从项目根目录加载配置
+  proj_root <- getwd()
+  config_path <- file.path(proj_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  } else {
+    # 如果不在项目根目录，尝试向上查找
+    for (i in 1:3) {
+      proj_root <- dirname(proj_root)
+      config_path <- file.path(proj_root, "config", "config.R")
+      if (file.exists(config_path)) {
+        source(config_path)
+        break
+      }
+    }
+  }
+}, error = function(e) {
+  # 如果配置文件不存在，使用默认值
+  message("配置文件未找到，使用默认值")
+})
+
 # -----------------------------------------------------------------------------
 # 核心功能：创建杂交计划
 # -----------------------------------------------------------------------------
@@ -838,7 +861,7 @@ cross_config_ui <- function(id) {
       # 步骤 3 & 4：配置与执行
       column(4,
         h4("3. 配置参数"),
-        textInput(ns("input_batch"), "批次名称", value = format(Sys.Date(), "%Y春季")),
+        textInput(ns("input_batch"), "批次名称", value = format(Sys.Date(), SoyCross$config$cross$default_batch_format)),
         checkboxInput(ns("check_reciprocal"), "自动生成反交", TRUE),
         hr(),
         h4("4. 确认与生成"),

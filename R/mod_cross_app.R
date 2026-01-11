@@ -11,6 +11,29 @@ library(dplyr)
 library(glue)
 library(rhandsontable)
 
+# 加载配置
+tryCatch({
+  # 尝试从项目根目录加载配置
+  proj_root <- getwd()
+  config_path <- file.path(proj_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  } else {
+    # 如果不在项目根目录，尝试向上查找
+    for (i in 1:3) {
+      proj_root <- dirname(proj_root)
+      config_path <- file.path(proj_root, "config", "config.R")
+      if (file.exists(config_path)) {
+        source(config_path)
+        break
+      }
+    }
+  }
+}, error = function(e) {
+  # 如果配置文件不存在，使用默认值
+  message("配置文件未找到，使用默认值")
+})
+
 cross_app_ui <- function(id) {
   ns <- NS(id)
   
@@ -51,7 +74,7 @@ cross_app_ui <- function(id) {
         fluidPage(
           div(style = 'overflow-x: hidden;', rHandsontableOutput(ns("matrix"))),
           verbatimTextOutput(ns("matrix_summary")),
-          textInput(ns("batch"), "批次名", value = format(Sys.Date(), "%Y春季")),
+          textInput(ns("batch"), "批次名", value = format(Sys.Date(), SoyCross$config$cross$default_batch_format)),
           textInput(ns("memo"), "组合特点（可选）", value = ""),
           numericInput(ns("limit"), "生成数量 (可选)", value = NA, min = 1),
           actionButton(ns("run_write"), "写入数据库", class = "btn-danger"),

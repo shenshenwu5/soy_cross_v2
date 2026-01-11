@@ -31,6 +31,16 @@ tryCatch({
 # 如果当前 wd 是 apps 或 scripts，向上修正
 if (basename(project_root) %in% c("apps", "scripts")) project_root <- dirname(project_root)
 
+# 加载配置
+tryCatch({
+  config_path <- file.path(project_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  }
+}, error = function(e) {
+  message("配置文件加载失败：", e$message)
+})
+
 # 加载业务逻辑脚本
 # 1. 加载 mod_cross.R (包含 get_crosses_by_batch, has_cross 等数据库操作函数)
 mod_cross_path <- file.path(project_root, "R", "mod_cross.R")
@@ -76,18 +86,18 @@ ui <- fluidPage(
       selectInput("gen_batch", "批次选择 (Batch)", choices = NULL),
       
       # 2. 编号参数
-      textInput("gen_prefix", "组合前缀 (Prefix)", value = format(Sys.Date(), "G%y")),
-      numericInput("gen_start_n", "起始编号 (Start N)", value = 1, min = 1),
-      numericInput("gen_digits", "编号位数 (Digits)", value = 3, min = 1),
+      textInput("gen_prefix", "组合前缀 (Prefix)", value = format(Sys.Date(), SoyCross$config$field$default_prefix)),
+      numericInput("gen_start_n", "起始编号 (Start N)", value = SoyCross$config$field$default_start_n, min = 1),
+      numericInput("gen_digits", "编号位数 (Digits)", value = SoyCross$config$field$default_digits, min = 1),
       
       hr(),
       h4("种植参数"),
       
       # 3. 种植参数
-      textInput("gen_place", "种植地点 (Place)", value = "海南"),
-      numericInput("gen_rows", "种植行数 (Rows)", value = 2, min = 1),
-      numericInput("gen_rp", "重复数 (Replicates)", value = 1, min = 1),
-      numericInput("gen_interval", "间隔 (Interval)", value = 999, min = 1),
+      textInput("gen_place", "种植地点 (Place)", value = SoyCross$config$field$default_place),
+      numericInput("gen_rows", "种植行数 (Rows)", value = SoyCross$config$field$default_rows, min = 1),
+      numericInput("gen_rp", "重复数 (Replicates)", value = SoyCross$config$field$default_rp, min = 1),
+      numericInput("gen_interval", "间隔 (Interval)", value = SoyCross$config$field$default_interval, min = 1),
       
       hr(),
       helpText("说明：配置好参数后，先点击'生成预览'检查数据，确认无误后再回写数据库或导出文件。")

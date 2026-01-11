@@ -18,6 +18,16 @@ tryCatch({
   message("Please install soyplant： devtools::install_github('zhaoqingsonga/soyplant')")
 })
 
+# === 加载配置 ===
+tryCatch({
+  config_path <- file.path(project_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  }
+}, error = function(e) {
+  message("配置文件加载失败：", e$message)
+})
+
 # === 环境配置 ===
 
 # 确定项目根目录

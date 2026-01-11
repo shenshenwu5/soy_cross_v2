@@ -26,6 +26,16 @@ tryCatch({
 }, error = function(e) { project_root <<- getwd() })
 if (basename(project_root) %in% c("apps", "scripts")) project_root <- dirname(project_root)
 
+# 加载配置
+tryCatch({
+  config_path <- file.path(project_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  }
+}, error = function(e) {
+  message("配置文件加载失败：", e$message)
+})
+
 # 加载模块
 mod_cross_path <- file.path(project_root, "R", "mod_cross.R")
 if (!file.exists(mod_cross_path)) stop("❌ 找不到文件：", mod_cross_path)
@@ -106,6 +116,7 @@ ui <- navbarPage("杂交组合配置", id = "steps",
       div(style = 'overflow-x: hidden;', rHandsontableOutput("matrix")),
       verbatimTextOutput("matrix_summary"),
       textInput("batch", "批次名", value = format(Sys.Date(), "%Y春季")),
+      textInput("memo", "组合特点（必填）", value = SoyCross$config$cross_matrix$default_memo, placeholder = "请输入组合特点"),
       numericInput("limit", "生成数量 (可选)", value = NA, min = 1),
       actionButton("run_write", "写入数据库", class = "btn-danger"),
       verbatimTextOutput("run_summary"),
@@ -479,6 +490,11 @@ server <- function(input, output, session) {
   # D 执行
   observeEvent(input$run_write, {
     req(input$batch)
+    # 验证 memo 不为空
+    if (!nzchar(input$memo)) {
+      showNotification("组合特点不能为空，请填写组合特点", type = "error")
+      return()
+    }
     x <- input$matrix; if (is.null(x)) { showNotification("矩阵为空", type="warning"); return(NULL) }
     
     m_raw <- hot_to_r(x)
@@ -524,7 +540,8 @@ server <- function(input, output, session) {
         pairs = pairs,
         db_path = db_path,
         include_reciprocal = TRUE, # 默认生成反交
-        limit = input$limit
+        limit = input$limit,
+        memo = input$memo
       )
       
       output$run_summary <- renderText(glue(

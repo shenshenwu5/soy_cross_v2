@@ -75,7 +75,7 @@ cross_app_ui <- function(id) {
           div(style = 'overflow-x: hidden;', rHandsontableOutput(ns("matrix"))),
           verbatimTextOutput(ns("matrix_summary")),
           textInput(ns("batch"), "批次名", value = format(Sys.Date(), SoyCross$config$cross$default_batch_format)),
-          textInput(ns("memo"), "组合特点（可选）", value = ""),
+          textInput(ns("memo"), "组合特点（必填）", value = SoyCross$config$cross_matrix$default_memo, placeholder = "请输入组合特点"),
           numericInput(ns("limit"), "生成数量 (可选)", value = NA, min = 1),
           actionButton(ns("run_write"), "写入数据库", class = "btn-danger"),
           verbatimTextOutput(ns("run_summary")),
@@ -391,6 +391,11 @@ cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
 
     observeEvent(input$run_write, {
       req(input$batch)
+      # 验证 memo 不为空
+      if (!nzchar(input$memo)) {
+        showNotification("组合特点不能为空，请填写组合特点", type = "error")
+        return()
+      }
       x <- input$matrix; if (is.null(x)) { showNotification("矩阵为空", type="warning"); return(NULL) }
       m_raw <- hot_to_r(x)
       if (nrow(m_raw) > 1) m_raw <- m_raw[-1, , drop=FALSE]

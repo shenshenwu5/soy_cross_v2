@@ -18,13 +18,16 @@ SoyCross$config <- list(
     default_batch_format = "N%y11"
   ),
   field = list(
-    default_prefix = "N%y11",#默认组合前缀
-    default_start_n = 1,   #起启编号
-    default_digits = 3,    #编号位数
-    default_place = "武汉",#默认地点
-    default_rows = 2,      #默认行数
-    default_rp = 1,        #默认重复数
-    default_interval = 999 #默认间隔
+    default_prefix = "N%y11", #默认组合前缀
+    default_start_n = 1,      #起启编号
+    default_digits = 3,       #编号位数
+    default_place = "武汉",   #默认地点
+    default_rows = 2,         #默认行数
+    default_rp = 1,           #默认重复数
+    default_interval = 999    #默认间隔
+  ),
+  cross_matrix = list(
+    default_memo = "高产"     #杂交特点默认值
   ),
   analysis = list(),
   io = list(),

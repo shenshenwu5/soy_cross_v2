@@ -202,6 +202,7 @@ book_app_server <- function(id, db_path = "data/db/soy_cross.db") {
             combi_input <- data.frame(
               ma = mydata$male_name,
               pa = mydata$female_name,
+              memo = mydata$memo,#传入备注
               stringsAsFactors = FALSE
             )
             combi_input <- combi_input %>% arrange(desc(ma), desc(pa))

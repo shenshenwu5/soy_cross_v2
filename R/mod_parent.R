@@ -13,6 +13,8 @@ parent_admin_ui <- function(id) {
           overflow-y: auto; 
           padding-right: 6px;
         }
+        .btn-block { width: 100%; margin-top: 6px; }
+        .sidebar-section-title { margin: 8px 0 4px 0; font-weight: 600; }
       "))
     ),
     titlePanel("亲本管理"),
@@ -20,12 +22,17 @@ parent_admin_ui <- function(id) {
       sidebarPanel(
         width = 3,
         div(class = "sidebar-scroll",
+          div(class = "sidebar-section-title", "查询"),
           textInput(ns("search_name"), "按名称搜索", ""),
           checkboxInput(ns("filter_active"), "仅显示活跃亲本", value = TRUE),
           actionButton(ns("btn_refresh"), "刷新列表", icon = icon("sync"), class = "btn-primary btn-block", width = "100%"),
+          tags$hr(),
+          div(class = "sidebar-section-title", "数据"),
           fileInput(ns("file_import_parents"), "选择亲本Excel", accept = c(".xlsx", ".xls")),
-          actionButton(ns("btn_import_parents"), "导入亲本", icon = icon("file-import"), class = "btn-primary btn-block", width = "100%"),
-          downloadButton(ns("btn_export_parents"), "导出亲本", class = "btn-secondary btn-block")
+          fluidRow(
+            column(6, actionButton(ns("btn_import_parents"), "导入亲本", icon = icon("file-import"), class = "btn-primary btn-block", width = "100%")),
+            column(6, downloadButton(ns("btn_export_parents"), "导出亲本", class = "btn-secondary btn-block"))
+          )
         )
       ),
       mainPanel(

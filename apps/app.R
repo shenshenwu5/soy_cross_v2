@@ -50,6 +50,7 @@ db_path <- file.path(project_root, "data", "db", "soy_cross.db")
 # === 加载模块 ===
 
 # 辅助函数模块
+source(file.path(project_root, "R", "utils_io.R"))        # 通用IO函数
 source(file.path(project_root, "R", "mod_cross.R"))
 if (file.exists(file.path(project_root, "R", "mod_analysis.R"))) {
   source(file.path(project_root, "R", "mod_analysis.R"))

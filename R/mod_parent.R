@@ -49,7 +49,26 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
   moduleServer(id, function(input, output, session) {
     db_path <- normalizePath(db_path, winslash = "/", mustWork = FALSE)
     pending_delete_id <- reactiveVal(NULL)
-    if (file.exists(file.path(getwd(), "R", "utils_io.R"))) source(file.path(getwd(), "R", "utils_io.R"))
+    
+    # 尝试加载 utils_io.R - 从项目根目录加载
+    # 首先尝试从当前工作目录加载
+    if (file.exists(file.path(getwd(), "R", "utils_io.R"))) {
+      source(file.path(getwd(), "R", "utils_io.R"))
+    } else {
+      # 如果在工作目录找不到，尝试从项目根目录加载
+      # 假设当前文件在 R 目录下
+      project_root <- dirname(getwd())
+      if (file.exists(file.path(project_root, "R", "utils_io.R"))) {
+        source(file.path(project_root, "R", "utils_io.R"))
+      } else {
+        # 如果在上一级目录也找不到，尝试从相对路径加载
+        if (file.exists("../R/utils_io.R")) {
+          source("../R/utils_io.R")
+        } else if (file.exists("./utils_io.R")) {
+          source("./utils_io.R")
+        }
+      }
+    }
     ensure_log <- function() {
       d <- file.path(getwd(), "logs")
       if (!dir.exists(d)) dir.create(d, showWarnings = FALSE)
@@ -107,21 +126,66 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       refresh_trigger(refresh_trigger() + 1)
       showNotification("已刷新", type = "message")
     })
-    observeEvent(input$btn_import_parents, {
+   observeEvent(input$btn_import_parents, {
       f <- input$file_import_parents
       if (is.null(f) || is.null(f$datapath) || !file.exists(f$datapath)) {
         showNotification("请选择Excel文件", type = "error")
         return(NULL)
       }
-      res <- try(import_parents_from_file(f$datapath, db_path = db_path, mode = "upsert", key = "id", sheet = NULL, backup_before = TRUE), silent = TRUE)
+      
+      # 首先尝试使用 id 作为键进行 upsert 操作
+      res <- try(
+        import_parents_from_file(
+          f$datapath,
+          db_path = db_path,
+          mode = "upsert",
+          key = "id",
+          backup_before = FALSE
+        ),
+        silent = TRUE
+      )
+      
+      # 如果失败，再尝试使用 name 作为键进行 upsert 操作
       if (inherits(res, "try-error")) {
-        res <- try(import_parents_from_file(f$datapath, db_path = db_path, mode = "upsert", key = "name", sheet = NULL, backup_before = TRUE), silent = TRUE)
+        res <- try(
+          import_parents_from_file(
+            f$datapath,
+            db_path = db_path,
+            mode = "upsert",
+            key = "name",
+            backup_before = FALSE
+          ),
+          silent = TRUE
+        )
       }
+      
       if (inherits(res, "try-error")) {
-        showNotification("导入失败", type = "error")
+        # 获取错误信息并显示
+        error_msg <- conditionMessage(attr(res, "condition"))
+        ok <- FALSE
+        df <- try(read_table(f$datapath), silent = TRUE)
+        if (!inherits(df, "try-error")) {
+          con <- dbConnect(RSQLite::SQLite(), db_path)
+          on.exit(dbDisconnect(con), add = TRUE)
+          try(backup_db(db_path, backup_name = "parents_import"), silent = TRUE)
+          ok <- !inherits(try(DBI::dbWriteTable(con, "parents", df, overwrite = TRUE), silent = TRUE), "try-error")
+        }
+        if (!ok) {
+          showNotification(paste("导入失败：", error_msg), type = "error")
+        } else {
+          refresh_trigger(refresh_trigger() + 1)
+          showNotification("已覆盖导入", type = "message")
+        }
       } else {
         refresh_trigger(refresh_trigger() + 1)
-        showNotification("导入完成", type = "message")
+        
+        # 显示导入结果
+        if (is.list(res) && all(c("inserted", "updated", "skipped") %in% names(res))) {
+          msg <- paste0("导入完成 - 新增: ", res$inserted, ", 更新: ", res$updated, ", 跳过: ", res$skipped)
+        } else {
+          msg <- paste0("导入完成 - 总计: ", ifelse(is.list(res), res$total, res))
+        }
+        showNotification(msg, type = "message")
       }
     })
     output$btn_export_parents <- downloadHandler(

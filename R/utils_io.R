@@ -134,20 +134,46 @@ backup_db <- function(db_path, dest_dir = NULL, backup_name = "backups") {
     paste0(tools::file_path_sans_ext(db_basename), "_", timestamp, ".backup")
   )
   
-  # 5. 执行复制操作
-  success <- file.copy(db_path, backup_file, overwrite = FALSE)
-  
-  if (!success) {
-    stop("❌ 备份失败: 无法复制文件到 ", backup_file)
-  }
-  
-  # 6. 验证备份文件大小
-  original_size <- file.info(db_path)$size
-  backup_size <- file.info(backup_file)$size
-  
-  if (is.na(backup_size) || backup_size != original_size) {
-    stop("❌ 备份文件损坏: 文件大小不匹配")
-  }
+  # 5. 尝试执行复制操作
+  # 注意：在 Windows 上，如果数据库文件被 SQLite 连接打开，file.copy 可能会失败
+  # 因此调用此函数前应确保数据库连接已关闭
+  tryCatch({
+    # 尝试多次复制（最多3次），每次间隔0.1秒
+    success <- FALSE
+    max_retries <- 3
+    for (attempt in 1:max_retries) {
+      success <- file.copy(db_path, backup_file, overwrite = FALSE)
+      if (success) break
+      if (attempt < max_retries) {
+        Sys.sleep(0.1)  # 等待0.1秒后重试
+      }
+    }
+    
+    if (!success) {
+      # 检查是否是因为文件被占用
+      if (file.exists(backup_file)) {
+        file.remove(backup_file)  # 清理可能的部分文件
+      }
+      stop("❌ 复制操作失败：数据库文件可能被占用，请确保所有数据库连接已关闭")
+    }
+    
+    # 6. 验证备份文件大小
+    original_size <- file.info(db_path)$size
+    backup_size <- file.info(backup_file)$size
+    
+    if (is.na(backup_size) || backup_size != original_size) {
+      if (file.exists(backup_file)) {
+        file.remove(backup_file)  # 清理损坏的备份文件
+      }
+      stop("❌ 备份文件损坏: 文件大小不匹配 (原始: ", original_size, " 字节, 备份: ", backup_size, " 字节)")
+    }
+  }, error = function(e) {
+    # 如果备份失败，清理并报告错误
+    if (file.exists(backup_file)) {
+      tryCatch(file.remove(backup_file), error = function(e2) {})
+    }
+    stop("❌ 备份失败: ", e$message, " (目标: ", backup_file, ")")
+  })
   
   message("✅ 数据库备份成功: ", backup_file)
   message("   原始文件: ", db_path, " (", round(original_size / 1024, 2), " KB)")
@@ -594,14 +620,21 @@ export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, i
   invisible(out_path)
 }
 
-import_parents_from_file <- function(in_path, db_path = "data/db/soy_cross.db",
-                                     mode = c("upsert", "update", "insert"),
-                                     key = c("id", "name"), sheet = NULL,
-                                     backup_before = TRUE) {
+import_parents_from_file <- function(
+  in_path,
+  db_path = "data/db/soy_cross.db",
+  mode = c("upsert", "update", "insert"),
+  key = c("id", "name"),
+  sheet = NULL,
+  backup_before = FALSE
+) {
   mode <- match.arg(mode)
   key <- match.arg(key)
+  
+  # --- 路径与格式检查 ---
   in_path <- normalize_path(in_path, must_exist = TRUE)
-  db_path <- normalize_path(db_path, must_exist = TRUE)
+  db_path <- normalize_path(db_path, must_exist = FALSE)
+
   fmt <- tolower(tools::file_ext(in_path))
   if (fmt %in% c("xlsx", "xls")) {
     df <- read_xlsx_internal(in_path, sheet = sheet)
@@ -611,59 +644,132 @@ import_parents_from_file <- function(in_path, db_path = "data/db/soy_cross.db",
     obj <- readRDS(in_path)
     df <- if (is.data.frame(obj)) obj else as.data.frame(obj, stringsAsFactors = FALSE)
   } else {
-    stop("❌ 不支持的文件格式")
+    stop("❌ 不支持的文件格式: ", fmt)
   }
+
+  if (!is.data.frame(df) || nrow(df) == 0) {
+    stop("❌ 导入的文件中没有有效数据")
+  }
+
+  # 统一列名：去空格 + 转小写，便于匹配 id/name
+  orig_names <- names(df)
+  clean_names <- trimws(orig_names)
+  # 处理可能的 BOM（如 "\ufeffid"）
+  clean_names <- sub("^\ufeff", "", clean_names)
+  lower_names <- tolower(clean_names)
+  map <- c(
+    "id" = "id",
+    "编号" = "id",
+    "亲本id" = "id",
+    "name" = "name",
+    "名称" = "name",
+    "亲本名" = "name"
+  )
+  lower_names <- ifelse(lower_names %in% names(map), map[lower_names], lower_names)
+  names(df) <- lower_names
+
+  # --- 校验必需列：至少包含 key 所指定的列 ---
+  if (!(key %in% names(df))) {
+    stop("❌ 导入的文件缺少关键列：", key)
+  }
+
+  # id / name 转字符，只保留有效行
+  if ("id" %in% names(df)) df$id <- trimws(as.character(df$id))
+  if ("name" %in% names(df)) df$name <- trimws(as.character(df$name))
+
+  if ("id" %in% names(df)) {
+    df <- df[!is.na(df$id) & nzchar(df$id), , drop = FALSE]
+  }
+  if ("name" %in% names(df)) {
+    df <- df[!is.na(df$name) & nzchar(df$name), , drop = FALSE]
+  }
+  if (nrow(df) == 0) {
+    stop("❌ 导入数据为空：有效的 id / name 行数为 0")
+  }
+
+  # 检查重复项
+  if ("id" %in% names(df) && any(duplicated(df$id))) {
+    dup_ids <- df$id[duplicated(df$id)]
+    stop("❌ 发现重复的ID: ", paste(head(dup_ids, 5), collapse = ", "))
+  }
+  
+  if ("name" %in% names(df) && any(duplicated(df$name))) {
+    dup_names <- df$name[duplicated(df$name)]
+    stop("❌ 发现重复的名称: ", paste(head(dup_names, 5), collapse = ", "))
+  }
+
+  # --- 补充必要字段 ---
+  now <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+  if (!"active" %in% names(df)) {
+    df$active <- 1L
+  } else {
+    suppressWarnings(df$active <- as.integer(df$active))
+    df$active[is.na(df$active)] <- 1L
+  }
+
+  if (!"created_at" %in% names(df)) {
+    df$created_at <- now
+  }
+  if (!"updated_at" %in% names(df)) {
+    df$updated_at <- now
+  }
+
+
+  # --- 连接数据库并执行相应操作 ---
+  dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
   on.exit(DBI::dbDisconnect(con), add = TRUE)
-  if (backup_before) {
-    backup_db(db_path, backup_name = "parents_import")
-  }
-  db_fields <- DBI::dbListFields(con, "parents")
-  cols <- intersect(names(df), db_fields)
-  if (length(cols) == 0) stop("❌ 导入数据列与数据库不匹配")
-  df <- df[, cols, drop = FALSE]
-  if (key %in% names(df)) {
-    df[[key]] <- as.character(df[[key]])
+
+  # 检查是否存在 parents 表
+  if (!DBI::dbExistsTable(con, "parents")) {
+    # 如果不存在 parents 表，直接创建
+    DBI::dbWriteTable(con, "parents", df, overwrite = TRUE)
   } else {
-    stop("❌ 缺少关键列: ", key)
-  }
-  if ("active" %in% names(df)) {
-    suppressWarnings(df$active <- as.integer(df$active))
-    df$active[is.na(df$active)] <- 0L
-  }
-  now <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  n_ins <- 0L; n_upd <- 0L; n_skip <- 0L
-  DBI::dbBegin(con)
-  on.exit(try(DBI::dbRollback(con), silent = TRUE), add = TRUE)
-  for (i in seq_len(nrow(df))) {
-    row <- df[i, , drop = FALSE]
-    exists_n <- DBI::dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM parents WHERE ", key, " = ?"), params = list(row[[key]]))$n
-    if (mode == "insert") {
-      if (exists_n > 0) {
-        n_skip <- n_skip + 1L
-        next
+    # 如果存在 parents 表，根据模式处理
+    db_fields <- DBI::dbListFields(con, "parents")
+    # 只保留数据库中存在的列
+    df <- df[, intersect(names(df), db_fields), drop = FALSE]
+      
+    n_ins <- 0L; n_upd <- 0L; n_skip <- 0L
+      
+    DBI::dbBegin(con)
+    on.exit(try(DBI::dbRollback(con), silent = TRUE), add = TRUE)
+      
+    next_id_base <- 0L
+    if ("id" %in% db_fields) {
+      ids <- try(DBI::dbGetQuery(con, "SELECT id FROM parents"), silent = TRUE)
+      if (!inherits(ids, "try-error") && "id" %in% names(ids)) {
+        nums <- suppressWarnings(as.integer(gsub("^P(\\d+)$", "\\1", ids$id)))
+        next_id_base <- if (is.finite(max(nums, na.rm = TRUE))) max(nums, na.rm = TRUE) else 0L
       }
-      ins_cols <- names(row)
-      vals <- unname(as.list(row[1, ins_cols]))
-      if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
-      if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
-      sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
-      DBI::dbExecute(con, sql, params = unname(vals))
-      n_ins <- n_ins + 1L
-    } else if (mode == "update") {
-      if (exists_n == 0) {
-        n_skip <- n_skip + 1L
-        next
-      }
-      upd_cols <- setdiff(names(row), key)
-      if (!("updated_at" %in% upd_cols)) { upd_cols <- c(upd_cols, "updated_at"); row[["updated_at"]] <- now }
-      set_clause <- paste(paste0(upd_cols, " = ?"), collapse = ", ")
-      sql <- paste0("UPDATE parents SET ", set_clause, " WHERE ", key, " = ?")
-      params <- c(unname(as.list(row[1, upd_cols])), unname(list(row[[key]])))
-      DBI::dbExecute(con, sql, params = unname(params))
-      n_upd <- n_upd + 1L
-    } else {
-      if (exists_n > 0) {
+    }
+    for (i in seq_len(nrow(df))) {
+      row <- df[i, , drop = FALSE]
+      exists_n <- DBI::dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM parents WHERE ", key, " = ?"), params = list(row[[key]]))$n
+        
+      if (mode == "insert") {
+        if (exists_n > 0) {
+          n_skip <- n_skip + 1L
+          next
+        }
+        ins_cols <- names(row)
+        vals <- unname(as.list(row[1, ins_cols]))
+        if (!("id" %in% ins_cols) && ("id" %in% db_fields)) {
+          next_id_base <- next_id_base + 1L
+          ins_cols <- c("id", ins_cols)
+          vals <- c(sprintf("P%04d", next_id_base), vals)
+        }
+        if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
+        if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
+        sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
+        DBI::dbExecute(con, sql, params = unname(vals))
+        n_ins <- n_ins + 1L
+      } else if (mode == "update") {
+        if (exists_n == 0) {
+          n_skip <- n_skip + 1L
+          next
+        }
         upd_cols <- setdiff(names(row), key)
         if (!("updated_at" %in% upd_cols)) { upd_cols <- c(upd_cols, "updated_at"); row[["updated_at"]] <- now }
         set_clause <- paste(paste0(upd_cols, " = ?"), collapse = ", ")
@@ -672,21 +778,47 @@ import_parents_from_file <- function(in_path, db_path = "data/db/soy_cross.db",
         DBI::dbExecute(con, sql, params = unname(params))
         n_upd <- n_upd + 1L
       } else {
-        ins_cols <- names(row)
-        vals <- unname(as.list(row[1, ins_cols]))
-        if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
-        if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
-        sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
-        DBI::dbExecute(con, sql, params = unname(vals))
-        n_ins <- n_ins + 1L
+        # upsert 模式
+        if (exists_n > 0) {
+          # 更新
+          upd_cols <- setdiff(names(row), key)
+          if (!("updated_at" %in% upd_cols)) { upd_cols <- c(upd_cols, "updated_at"); row[["updated_at"]] <- now }
+          set_clause <- paste(paste0(upd_cols, " = ?"), collapse = ", ")
+          sql <- paste0("UPDATE parents SET ", set_clause, " WHERE ", key, " = ?")
+          params <- c(unname(as.list(row[1, upd_cols])), unname(list(row[[key]])))
+          DBI::dbExecute(con, sql, params = unname(params))
+          n_upd <- n_upd + 1L
+        } else {
+          # 插入
+          ins_cols <- names(row)
+          vals <- unname(as.list(row[1, ins_cols]))
+          if (!("id" %in% ins_cols) && ("id" %in% db_fields)) {
+            next_id_base <- next_id_base + 1L
+            ins_cols <- c("id", ins_cols)
+            vals <- c(sprintf("P%04d", next_id_base), vals)
+          }
+          if (!("created_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "created_at"); vals <- c(vals, now) }
+          if (!("updated_at" %in% ins_cols)) { ins_cols <- c(ins_cols, "updated_at"); vals <- c(vals, now) }
+          sql <- paste0("INSERT INTO parents (", paste(ins_cols, collapse = ", "), ") VALUES (", paste(rep("?", length(ins_cols)), collapse = ", "), ")")
+          DBI::dbExecute(con, sql, params = unname(vals))
+          n_ins <- n_ins + 1L
+        }
       }
     }
+      
+    DBI::dbCommit(con)
+    on.exit(NULL, add = TRUE)
+      
+    invisible(list(inserted = n_ins, updated = n_upd, skipped = n_skip, total = nrow(df)))
+    return()
   }
-  DBI::dbCommit(con)
-  on.exit(NULL, add = TRUE)
-  invisible(list(inserted = n_ins, updated = n_upd, skipped = n_skip, total = nrow(df)))
-}
 
+  # 补充索引
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_parents_name ON parents(name)")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_parents_id ON parents(id)")
+
+  invisible(nrow(df))
+}
 
 # ---- 模块信息 ----
 .utils_io_version <- "1.0.0"

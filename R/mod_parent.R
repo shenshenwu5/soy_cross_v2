@@ -22,7 +22,10 @@ parent_admin_ui <- function(id) {
         div(class = "sidebar-scroll",
           textInput(ns("search_name"), "按名称搜索", ""),
           checkboxInput(ns("filter_active"), "仅显示活跃亲本", value = TRUE),
-          actionButton(ns("btn_refresh"), "刷新列表", icon = icon("sync"), class = "btn-primary btn-block", width = "100%")
+          actionButton(ns("btn_refresh"), "刷新列表", icon = icon("sync"), class = "btn-primary btn-block", width = "100%"),
+          fileInput(ns("file_import_parents"), "选择亲本Excel", accept = c(".xlsx", ".xls")),
+          actionButton(ns("btn_import_parents"), "导入亲本", icon = icon("file-import"), class = "btn-primary btn-block", width = "100%"),
+          downloadButton(ns("btn_export_parents"), "导出亲本", class = "btn-secondary btn-block")
         )
       ),
       mainPanel(
@@ -46,6 +49,7 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
   moduleServer(id, function(input, output, session) {
     db_path <- normalizePath(db_path, winslash = "/", mustWork = FALSE)
     pending_delete_id <- reactiveVal(NULL)
+    if (file.exists(file.path(getwd(), "R", "utils_io.R"))) source(file.path(getwd(), "R", "utils_io.R"))
     ensure_log <- function() {
       d <- file.path(getwd(), "logs")
       if (!dir.exists(d)) dir.create(d, showWarnings = FALSE)
@@ -103,6 +107,93 @@ parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
       refresh_trigger(refresh_trigger() + 1)
       showNotification("已刷新", type = "message")
     })
+    observeEvent(input$btn_import_parents, {
+      f <- input$file_import_parents
+      if (is.null(f) || is.null(f$datapath) || !file.exists(f$datapath)) {
+        showNotification("请选择Excel文件", type = "error")
+        return(NULL)
+      }
+      res <- try(import_parents_from_file(f$datapath, db_path = db_path, mode = "upsert", key = "id", sheet = NULL, backup_before = TRUE), silent = TRUE)
+      if (inherits(res, "try-error")) {
+        res <- try(import_parents_from_file(f$datapath, db_path = db_path, mode = "upsert", key = "name", sheet = NULL, backup_before = TRUE), silent = TRUE)
+      }
+      if (inherits(res, "try-error")) {
+        showNotification("导入失败", type = "error")
+      } else {
+        refresh_trigger(refresh_trigger() + 1)
+        showNotification("导入完成", type = "message")
+      }
+    })
+    output$btn_export_parents <- downloadHandler(
+      filename = function() {
+        paste0("parents_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".xlsx")
+      },
+      content = function(file) {
+        tryCatch({
+          # 确保数据库路径存在
+          if (!file.exists(db_path)) {
+            stop("数据库文件不存在：", db_path)
+          }
+          
+          # 连接数据库并读取数据（使用当前的筛选条件）
+          con <- dbConnect(RSQLite::SQLite(), db_path)
+          on.exit(dbDisconnect(con), add = TRUE)
+          
+          # 构建查询（根据当前筛选条件）
+          sql <- "SELECT * FROM parents"
+          params <- list()
+          where_clauses <- character(0)
+          
+          # 应用活跃状态筛选
+          if (isTRUE(input$filter_active) && "active" %in% dbListFields(con, "parents")) {
+            where_clauses <- c(where_clauses, "active = 1")
+          }
+          
+          # 应用名称搜索筛选
+          if (!is.null(input$search_name) && nzchar(input$search_name) && "name" %in% dbListFields(con, "parents")) {
+            where_clauses <- c(where_clauses, "name LIKE ?")
+            params <- list(paste0("%", input$search_name, "%"))
+          }
+          
+          # 构建完整 SQL
+          if (length(where_clauses) > 0) {
+            sql <- paste(sql, "WHERE", paste(where_clauses, collapse = " AND "))
+          }
+          
+          # 执行查询
+          if (length(params) > 0) {
+            df <- dbGetQuery(con, sql, params = params)
+          } else {
+            df <- dbGetQuery(con, sql)
+          }
+          
+          # 检查是否有数据
+          if (nrow(df) == 0) {
+            stop("没有可导出的数据")
+          }
+          
+          # 使用 openxlsx 或 writexl 写入文件
+          if (requireNamespace("openxlsx", quietly = TRUE)) {
+            # 使用 openxlsx（推荐）
+            wb <- openxlsx::createWorkbook()
+            openxlsx::addWorksheet(wb, "parents")
+            openxlsx::writeData(wb, "parents", df, rowNames = FALSE)
+            # 自动调整列宽
+            openxlsx::setColWidths(wb, "parents", cols = 1:ncol(df), widths = "auto")
+            openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+          } else if (requireNamespace("writexl", quietly = TRUE)) {
+            # 使用 writexl（备选）
+            writexl::write_xlsx(list(parents = df), file)
+          } else {
+            # 如果没有 Excel 包，使用 CSV 格式
+            write.csv(df, file, row.names = FALSE, fileEncoding = "UTF-8-BOM")
+          }
+        }, error = function(e) {
+          stop("导出失败：", e$message)
+        })
+      },
+      contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     get_selected_row <- reactive({
       s <- input$tbl_parents_rows_selected

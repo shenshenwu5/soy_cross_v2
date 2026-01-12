@@ -581,7 +581,7 @@ import_cross_matrix <- function(in_path, sheet = NULL, batch = NULL, skip_na = T
   return(result_df)
 }
 
-export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, include_inactive = TRUE, format = NULL, overwrite = FALSE, backup_before = TRUE) {
+export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, include_inactive = TRUE, format = "xlsx", overwrite = FALSE, backup_before = TRUE) {
   db_path <- normalize_path(db_path, must_exist = TRUE)
   out_path <- normalize_path(out_path, create_dir = TRUE)
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)

@@ -32,9 +32,10 @@ cat("\n【示例 1】路径规范化\n")
 cat("--------------------------------------\n")
 
 # 1.1 规范化相对路径
-path1 <- normalize_path("data/db/soy_cross.db")
+db_path <- if (file.exists("config/config.R")) { source("config/config.R"); SoyCross$config$paths$db_path } else { "data/db/soy_cross.db" }
+path1 <- normalize_path(db_path)
 cat("相对路径 → 绝对路径:\n")
-cat("  输入: data/db/soy_cross.db\n")
+cat("  输入: ", db_path, "\n")
 cat("  输出:", path1, "\n\n")
 
 # 1.2 自动创建目录
@@ -76,12 +77,12 @@ if (!file.exists(demo_db)) {
 
 # 2.2 执行备份
 cat("执行数据库备份...\n")
-backup_file <- backup_db(demo_db)
+backup_file <- backup_db(db_path)
 cat("备份文件: ", backup_file, "\n\n")
 
 # 2.3 备份到自定义目录
 cat("备份到自定义目录...\n")
-backup_file2 <- backup_db(demo_db, dest_dir = "backups/manual", backup_name = "重要备份")
+backup_file2 <- backup_db(db_path, dest_dir = "backups/manual", backup_name = "重要备份")
 cat("备份文件: ", backup_file2, "\n\n")
 
 
@@ -257,7 +258,7 @@ cat("--------------------------------------\n")
 cat("场景: 批量导入历史杂交数据到生产数据库\n\n")
 
 # 6.1 准备工作
-prod_db <- normalize_path("data/db/soy_cross.db")
+prod_db <- normalize_path(if (file.exists("config/config.R")) { source("config/config.R"); SoyCross$config$paths$db_path } else { "data/db/soy_cross.db" })
 
 # 6.2 操作前备份
 cat("步骤 1: 备份生产数据库...\n")
@@ -317,6 +318,29 @@ tryCatch({
 cat("允许覆盖（overwrite=TRUE，会先备份）...\n")
 write_table(demo_data, test_file, overwrite = TRUE, backup_before = TRUE)
 cat("✅ 文件已更新，原文件已自动备份\n\n")
+
+
+# =============================================================================
+# 示例 8: 亲本数据导入导出
+# =============================================================================
+cat("\n【示例 8】亲本数据导入导出\n")
+cat("--------------------------------------\n")
+
+export_parents_to_file(
+  db_path = NULL,
+  out_path = "temp/parents_edit.xlsx",
+  overwrite = TRUE,          # 允许覆盖
+  backup_before = TRUE       # 覆盖前自动备份原文件
+)
+
+# 编辑后导入（示例为 upsert，以 id 为键）
+res <- import_parents_from_file(
+  in_path = "temp/parents_edit.xlsx",
+  db_path = NULL,
+  mode = "upsert",
+  key = "id",
+  backup_before = TRUE
+)
 
 
 # =============================================================================

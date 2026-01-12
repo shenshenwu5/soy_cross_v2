@@ -106,10 +106,14 @@ cross_app_ui <- function(id) {
   )
 }
 
-cross_app_server <- function(id, db_path = "data/db/soy_cross.db") {
+cross_app_server <- function(id, db_path = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
+    if (is.null(db_path)) {
+      db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+    }
+
     # 确保数据库目录存在
     if (!dir.exists(dirname(db_path))) dir.create(dirname(db_path), recursive = TRUE)
 

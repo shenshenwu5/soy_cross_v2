@@ -25,7 +25,11 @@ library(glue)
 #'   \item{as_female}{数据框，作为母本时的配组详情（含父本名称、批次、组合名）}
 #'   \item{as_male}{数据框，作为父本时的配组详情（含母本名称、批次、组合名）}
 #' @export
-analyze_parent_details <- function(parent_name, db_path = "data/db/soy_cross.db") {
+analyze_parent_details <- function(parent_name, db_path = NULL) {
+  
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   if (missing(parent_name) || !nzchar(parent_name)) {
     stop("❌ 参数错误：parent_name 不能为空")
@@ -102,7 +106,11 @@ analyze_parent_details <- function(parent_name, db_path = "data/db/soy_cross.db"
 #' @param top_n 返回前 N 个高频亲本，NULL 表示返回所有
 #' @return 数据框
 #' @export
-get_parent_usage_stats <- function(db_path = "data/db/soy_cross.db", top_n = NULL) {
+get_parent_usage_stats <- function(db_path = NULL, top_n = NULL) {
+  
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   if (!file.exists(db_path)) stop("❌ 数据库不存在")
   
@@ -189,7 +197,11 @@ get_parent_usage_stats <- function(db_path = "data/db/soy_cross.db", top_n = NUL
 #'
 #' @return 数据框，包含未配组亲本的 ID 和 Name
 #' @export
-find_unused_partners <- function(parent_name, role = c("female", "male"), db_path = "data/db/soy_cross.db") {
+find_unused_partners <- function(parent_name, role = c("female", "male"), db_path = NULL) {
+  
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   role <- match.arg(role)
   if (missing(parent_name) || !nzchar(parent_name)) stop("❌ 参数错误：parent_name 不能为空")

@@ -37,10 +37,13 @@ library(shiny)
 #' framework <- create_matrix_framework()
 #' print(framework$matrix[1:5, 1:5])
 create_matrix_framework <- function(
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     filter_active = TRUE,
     name_field = "name"
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   # === 参数验证 ===
   if (!file.exists(db_path)) {
@@ -132,11 +135,14 @@ create_matrix_framework <- function(
 #' print(filled_matrix[1:10, 1:10])
 fill_matrix_data <- function(
     framework,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     fill_value = "batch",
     batch_filter = NULL,
     show_reciprocal = TRUE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   # === 参数验证 ===
   if (!file.exists(db_path)) {
@@ -273,13 +279,16 @@ fill_matrix_data <- function(
 #'   fill_value = "status"
 #' )
 create_cross_matrix_view <- function(
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     filter_active = TRUE,
     name_field = "name",
     fill_value = "batch",
     batch_filter = NULL,
     show_reciprocal = TRUE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   
   message("\n", paste(rep("=", 60), collapse = ""))
   message("📊 创建杂交矩阵视图")
@@ -477,7 +486,10 @@ matrix_view_ui <- function(id) {
 #' @param db_path 字符串，数据库路径
 #'
 #' @export
-matrix_view_server <- function(id, db_path = "data/db/soy_cross.db") {
+matrix_view_server <- function(id, db_path = NULL) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   moduleServer(id, function(input, output, session) {
     
     load_batches <- function() {

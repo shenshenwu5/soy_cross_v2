@@ -9,7 +9,14 @@ library(RSQLite)
 # Config
 input_excel <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/temp/parents_edit.xlsx"
 processed_excel <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/temp/parents_edit_processed.xlsx"
-db_path <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/data/db/soy_cross.db"
+
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
 
 # Helper function to process range strings
 process_range_value <- function(x) {

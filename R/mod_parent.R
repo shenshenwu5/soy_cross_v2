@@ -52,8 +52,11 @@ parent_admin_ui <- function(id) {
   )
 }
 
-parent_admin_server <- function(id, db_path = "data/db/soy_cross.db") {
+parent_admin_server <- function(id, db_path = NULL) {
   moduleServer(id, function(input, output, session) {
+    if (is.null(db_path)) {
+      db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+    }
     db_path <- normalizePath(db_path, winslash = "/", mustWork = FALSE)
     pending_delete_id <- reactiveVal(NULL)
     

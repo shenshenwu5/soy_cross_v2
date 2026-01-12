@@ -146,7 +146,16 @@ ui <- navbarPage("杂交组合配置", id = "steps",
 
 # Server
 server <- function(input, output, session) {
-  db_path <- file.path(project_root, "data", "db", "soy_cross.db")
+  raw_db_path <- if (exists("SoyCross") && !is.null(SoyCross$config$paths$db_path)) SoyCross$config$paths$db_path else NA
+  if (is.na(raw_db_path) || !nzchar(raw_db_path)) {
+    db_path <- file.path(project_root, "data", "db", "soy_cross.db")
+  } else {
+    if (grepl("^[A-Za-z]:", raw_db_path) || startsWith(raw_db_path, "/") || startsWith(raw_db_path, "\\\\")) {
+      db_path <- raw_db_path
+    } else {
+      db_path <- file.path(project_root, raw_db_path)
+    }
+  }
   if (!dir.exists(dirname(db_path))) dir.create(dirname(db_path), recursive = TRUE)
 
   parents <- reactive({

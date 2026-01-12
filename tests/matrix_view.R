@@ -7,6 +7,14 @@
 # 加载矩阵视图模块
 source("R/mod_matrix.R")
 
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
+
 # =============================================================================
 # 示例1：创建基础矩阵框架
 # =============================================================================
@@ -113,7 +121,8 @@ cat(paste(rep("=", 70), collapse = ""), "\n\n")
 
 # 首先查看有哪些批次
 library(RSQLite)
-con <- dbConnect(SQLite(), "data/db/soy_cross.db")
+db_path <- if (file.exists("config/config.R")) { source("config/config.R"); SoyCross$config$paths$db_path } else { "data/db/soy_cross.db" }
+con <- dbConnect(SQLite(), db_path)
 batches <- dbGetQuery(con, "SELECT DISTINCT batch FROM crosses")$batch
 dbDisconnect(con)
 

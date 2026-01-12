@@ -7,6 +7,14 @@
 # 加载杂交计划模块
 source("R/mod_cross.R")
 
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
+
 get_crosses_by_batch("一")
 # =============================================================================
 # 示例1：使用亲本名称创建杂交计划
@@ -34,7 +42,7 @@ result1 <- create_cross_plan(
 clear_cross_batches_db(
   batch_names = c("2025春季批次"),
   preview = FALSE,
-  db_path = "data/db/soy_cross.db"
+  db_path = db_path
 )
 
 
@@ -144,7 +152,7 @@ cat(paste(rep("=", 70), collapse = ""), "\n\n")
 
 # 从数据库读取符合条件的亲本
 library(RSQLite)
-con <- dbConnect(SQLite(), "data/db/soy_cross.db")
+con <- dbConnect(SQLite(), db_path)
 
 # 选择转基因亲本作为母本
 mothers_bulk <- dbGetQuery(con, "

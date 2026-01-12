@@ -77,12 +77,16 @@ create_cross_plan <- function(
     batch_name,
     mothers,
     fathers,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     include_reciprocal = TRUE,
     status = "planned",
     use_id = FALSE
 ) {
   
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
+
   # === 参数验证 ===
   if (missing(batch_name) || is.null(batch_name) || !nzchar(batch_name)) {
     stop("❌ 参数错误：batch_name 不能为空")
@@ -292,9 +296,12 @@ create_cross_plan <- function(
 update_cross_names_from_df <- function(
     data,
     batch,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     is_id = FALSE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (missing(data) || !is.data.frame(data)) stop("❌ 参数错误：data 必须是一个数据框")
   use_batch <- !(missing(batch) || is.null(batch) || !nzchar(batch))
   required_cols <- c("ma", "pa", "name")
@@ -520,9 +527,12 @@ generate_cross_id <- function(female_id, male_id) {
 #' @return 数据框，包含各批次的统计信息
 #' @export
 summarize_cross_batches_db <- function(
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     batch_filter = NULL
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (!file.exists(db_path)) {
     stop("❌ 数据库文件不存在：", db_path)
   }
@@ -570,9 +580,12 @@ summarize_cross_batches_db <- function(
 has_cross <- function(
     female,
     male,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     use_id = FALSE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (!file.exists(db_path)) {
     stop("❌ 数据库文件不存在：", db_path)
   }
@@ -617,12 +630,15 @@ has_cross <- function(
 create_specific_cross_plan <- function(
     batch_name,
     pairs,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     include_reciprocal = TRUE,
     limit = NA,
     status = "planned",
     memo = ""
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (missing(batch_name) || !nzchar(batch_name)) stop("❌ 参数错误：batch_name 不能为空")
   if (missing(pairs) || !is.data.frame(pairs)) stop("❌ 参数错误：pairs 必须是数据框")
   if (!all(c("female_id", "male_id") %in% names(pairs))) stop("❌ pairs 必须包含 female_id 和 male_id 列")
@@ -744,9 +760,12 @@ create_specific_cross_plan <- function(
 clear_cross_batches_db <- function(
     batch_names,
     preview = TRUE,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     ask = TRUE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (missing(batch_names) || length(batch_names) == 0) stop("❌ 参数错误：batch_names 不能为空")
   if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
   con <- dbConnect(SQLite(), db_path)
@@ -798,8 +817,11 @@ clear_cross_batches_db <- function(
 }
 
 list_cross_batches_db <- function(
-    db_path = "data/db/soy_cross.db"
+    db_path = NULL
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
@@ -809,9 +831,12 @@ list_cross_batches_db <- function(
 
 get_crosses_by_batch <- function(
     batch,
-    db_path = "data/db/soy_cross.db",
+    db_path = NULL,
     include_reciprocal = TRUE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (missing(batch) || !nzchar(batch)) stop("❌ 参数错误：batch 不能为空")
   if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
   con <- dbConnect(SQLite(), db_path)
@@ -875,7 +900,10 @@ cross_config_ui <- function(id) {
 
 #' 杂交组合配置 Server
 #' @export
-cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
+cross_config_server <- function(id, db_path = NULL) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   # 尝试加载分析模块以支持冲突检测
   if (file.exists("R/mod_analysis.R")) source("R/mod_analysis.R")
 
@@ -1065,7 +1093,10 @@ cross_config_server <- function(id, db_path = "data/db/soy_cross.db") {
 #'
 #' @return 包含亲本详细信息的数据框
 #' @export
-join_cross_parents <- function(crosses_data, db_path = "data/db/soy_cross.db") {
+join_cross_parents <- function(crosses_data, db_path = NULL) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   if (missing(crosses_data) || !is.data.frame(crosses_data)) {
     stop("❌ 参数错误：crosses_data 必须是一个数据框")
   }

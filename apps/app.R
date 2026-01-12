@@ -44,8 +44,25 @@ tryCatch({
 # 如果当前 wd 是 apps 或 scripts，向上修正
 if (basename(project_root) %in% c("apps", "scripts")) project_root <- dirname(project_root)
 
-# 数据库路径
-db_path <- file.path(project_root, "data", "db", "soy_cross.db")
+tryCatch({
+  config_path <- file.path(project_root, "config", "config.R")
+  if (file.exists(config_path)) {
+    source(config_path)
+  }
+}, error = function(e) {
+  message("配置文件加载失败：", e$message)
+})
+
+raw_db_path <- if (exists("SoyCross") && !is.null(SoyCross$config$paths$db_path)) SoyCross$config$paths$db_path else NA
+if (is.na(raw_db_path) || !nzchar(raw_db_path)) {
+  db_path <- file.path(project_root, "data", "db", "soy_cross.db")
+} else {
+  if (grepl("^[A-Za-z]:", raw_db_path) || startsWith(raw_db_path, "/") || startsWith(raw_db_path, "\\\\")) {
+    db_path <- raw_db_path
+  } else {
+    db_path <- file.path(project_root, raw_db_path)
+  }
+}
 
 # === 加载模块 ===
 

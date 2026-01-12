@@ -2,7 +2,13 @@ library(RSQLite)
 library(DBI)
 
 # Database path
-db_path <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/data/db/soy_cross.db"
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/data/db/soy_cross.db"
+}
 con <- dbConnect(RSQLite::SQLite(), db_path)
 
 # Check for records with '转濉24'

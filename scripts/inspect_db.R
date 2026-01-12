@@ -8,7 +8,14 @@ library(dplyr)
 library(DBI)
 
 # 1. 连接数据库
-db_path <- "data/db/soy_cross.db"
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
+
 if (!file.exists(db_path)) {
   stop("❌ 数据库文件不存在：", db_path)
 }

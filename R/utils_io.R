@@ -107,7 +107,12 @@ normalize_path <- function(p, must_exist = FALSE, create_dir = FALSE) {
 #' }
 #'
 #' @export
-backup_db <- function(db_path, dest_dir = NULL, backup_name = "backups") {
+backup_db <- function(db_path = NULL, dest_dir = NULL, backup_name = "backups") {
+  # 0. 处理默认参数
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
+
   # 1. 验证数据库文件是否存在
   db_path <- normalize_path(db_path, must_exist = TRUE)
   
@@ -117,7 +122,12 @@ backup_db <- function(db_path, dest_dir = NULL, backup_name = "backups") {
   
   # 2. 确定备份目录
   if (is.null(dest_dir)) {
-    dest_dir <- dirname(db_path)
+    # 尝试从配置加载
+    if (exists("SoyCross") && !is.null(SoyCross$config$paths$backup_dir)) {
+      dest_dir <- SoyCross$config$paths$backup_dir
+    } else {
+      dest_dir <- dirname(db_path)
+    }
   }
   backup_dir <- file.path(dest_dir, backup_name)
   
@@ -607,7 +617,10 @@ import_cross_matrix <- function(in_path, sheet = NULL, batch = NULL, skip_na = T
   return(result_df)
 }
 
-export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, include_inactive = TRUE, format = "xlsx", overwrite = FALSE, backup_before = TRUE) {
+export_parents_to_file <- function(db_path = NULL, out_path, include_inactive = TRUE, format = "xlsx", overwrite = FALSE, backup_before = TRUE) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   db_path <- normalize_path(db_path, must_exist = TRUE)
   out_path <- normalize_path(out_path, create_dir = TRUE)
   con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
@@ -622,12 +635,15 @@ export_parents_to_file <- function(db_path = "data/db/soy_cross.db", out_path, i
 
 import_parents_from_file <- function(
   in_path,
-  db_path = "data/db/soy_cross.db",
+  db_path = NULL,
   mode = c("upsert", "update", "insert"),
   key = c("id", "name"),
   sheet = NULL,
   backup_before = FALSE
 ) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
   mode <- match.arg(mode)
   key <- match.arg(key)
   

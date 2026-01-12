@@ -9,8 +9,16 @@ files <- list.files(target_dir, pattern = "\\.xlsx$", full.names = TRUE)
 
 message(sprintf("📂 找到 %d 个文件:", length(files)))
 
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
+
 # 连接数据库准备匹配
-con <- dbConnect(SQLite(), "data/db/soy_cross.db")
+con <- dbConnect(SQLite(), db_path)
 on.exit(dbDisconnect(con))
 
 # 获取数据库中 N24WH 的所有组合 (ma_id, pa_id)

@@ -8,6 +8,7 @@ SoyCross <- new.env(parent = emptyenv())
 SoyCross$config <- list(
   paths = list(
     db_path = "data/db/soy_cross.db",
+    #db_path = "z:/soy_cross.db",
     backup_dir = "data/db"
   ),
   sqlite = list(

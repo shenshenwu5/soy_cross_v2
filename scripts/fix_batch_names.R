@@ -2,8 +2,15 @@
 library(RSQLite)
 library(DBI)
 
+# 尝试加载配置
+if (file.exists("config/config.R")) {
+  source("config/config.R")
+  db_path <- SoyCross$config$paths$db_path
+} else {
+  db_path <- "data/db/soy_cross.db"
+}
+
 # 设置数据库路径
-db_path <- "data/db/soy_cross.db"
 if (!file.exists(db_path)) {
   # 尝试绝对路径 (根据之前的环境信息)
   db_path <- "e:/FangCloudSync/R_WD360/Project/soy_cross_v2/data/db/soy_cross.db"

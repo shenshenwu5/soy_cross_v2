@@ -848,16 +848,15 @@ server <- function(input, output, session) {
   
   # 回写数据库
   observeEvent(input$btn_save_db_name, {
-    req(store_gen$my_combi)
     tryCatch({
-      if (exists("update_cross_names_from_df")) {
-        # 仅传递必要字段，匹配 jobs/cross_book.R 的用法
-        cols_to_update <- intersect(c("name", "ma", "pa"), names(store_gen$my_combi))
-        update_cross_names_from_df(store_gen$my_combi[, cols_to_update, drop=FALSE], input$gen_batch)
-        showNotification("数据库更新成功", type = "message")
-      } else {
-        stop("找不到 update_cross_names_from_df 函数")
-      }
+      update_cross_names(
+        batch = input$gen_batch,
+        prefix = input$gen_prefix,
+        start_n = input$gen_start_n,
+        digits = input$gen_digits,
+        db_path = db_path
+      )
+      showNotification("数据库更新成功", type = "message")
     }, error = function(e) {
       showNotification(paste("更新失败:", e$message), type = "error")
     })

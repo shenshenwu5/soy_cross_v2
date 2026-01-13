@@ -57,6 +57,12 @@ if (length(missing_funcs) > 0) {
   warning(paste("警告: 缺少核心函数:", paste(missing_funcs, collapse = ", ")))
 }
 
+# 3. 加载批次与命名预览工具函数（R/mod_book.R）
+mod_book_path <- file.path(project_root, "R", "mod_book.R")
+if (file.exists(mod_book_path)) {
+  source(mod_book_path)
+}
+
 # -----------------------------------------------------------------------------
 # UI Definition
 # -----------------------------------------------------------------------------
@@ -109,9 +115,9 @@ ui <- fluidPage(
       # 操作按钮区
       fluidRow(
         column(12,
-               actionButton("btn_calc_preview", "1. 生成预览", class = "btn-primary", icon = icon("play")),
+               actionButton("btn_save_db_name", "命名杂交名称(crosses_name)", class = "btn-danger", icon = icon("database")),
                span(style = "margin: 0 10px;", "|"),
-               actionButton("btn_save_db_name", "2. 填写杂交名称", class = "btn-danger", icon = icon("database")),
+               actionButton("btn_calc_preview", "1. 生成预览", class = "btn-primary", icon = icon("play")),
                span(style = "margin: 0 10px;", "|"),
                downloadButton("btn_export_xlsx", "3. 导出 Excel 采集簿", class = "btn-success")
         )
@@ -364,11 +370,12 @@ server <- function(input, output, session) {
                   class = "compact stripe hover")
   })
   
+  
+  
   # ---------------------------------------------------------------------------
   # 4. 回写数据库
   # ---------------------------------------------------------------------------
   observeEvent(input$btn_save_db_name, {
-    req(store_gen$my_combi)
     
     showModal(modalDialog(
       title = "确认回写数据库",
@@ -384,20 +391,16 @@ server <- function(input, output, session) {
     removeModal()
     
     tryCatch({
-      if (exists("update_cross_names_from_df")) {
-        # 提取必要字段
-        cols_to_update <- intersect(c("name", "ma", "pa"), names(store_gen$my_combi))
-        if (length(cols_to_update) == 0) stop("数据中缺少 name/ma/pa 字段")
-        
-        update_cross_names_from_df(
-          data = store_gen$my_combi[, cols_to_update, drop=FALSE], 
-          batch = input$gen_batch,
-          db_path = db_path # 显式传递 db_path
-        )
-        showNotification("数据库更新成功", type = "message")
-      } else {
-        stop("找不到 update_cross_names_from_df 函数")
-      }
+      update_cross_names(
+        batch = input$gen_batch,
+        prefix = input$gen_prefix,
+        start_n = input$gen_start_n,
+        digits = input$gen_digits,
+        db_path = db_path
+      )
+      showNotification("数据库更新成功", type = "message")
+      
+      
     }, error = function(e) {
       showNotification(paste("更新失败:", e$message), type = "error")
     })

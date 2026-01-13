@@ -293,160 +293,54 @@ create_cross_plan <- function(
 #'
 #' @return 更新记录数的整数
 #' @export
-update_cross_names_from_df <- function(
-    data,
-    batch,
-    db_path = NULL,
-    is_id = FALSE
+ 
+
+update_cross_names <- function(
+  batch,
+  prefix,
+  start_n = 1,
+  digits = 3,
+  db_path = NULL
 ) {
   if (is.null(db_path)) {
     db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
   }
-  if (missing(data) || !is.data.frame(data)) stop("❌ 参数错误：data 必须是一个数据框")
-  use_batch <- !(missing(batch) || is.null(batch) || !nzchar(batch))
-  required_cols <- c("ma", "pa", "name")
-  if (!all(required_cols %in% names(data))) {
-    stop("❌ 数据框必须包含列：", paste(required_cols, collapse = ", "))
-  }
-  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
-  
+  if (missing(batch) || is.null(batch) || !nzchar(batch)) stop("批次不能为空")
+  if (missing(prefix) || is.null(prefix) || !nzchar(prefix)) stop("前缀不能为空")
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
-  # 确保列为字符型，避免因子带来的问题
-  data$ma <- as.character(data$ma)
-  data$pa <- as.character(data$pa)
-  data$name <- as.character(data$name)
+  # 1. 按batch找到相应的记录，筛选 is_reciprocal=0 的记录
+  pos <- dbGetQuery(con, "SELECT female_id, male_id FROM crosses WHERE batch = ? AND (is_reciprocal IS NULL OR is_reciprocal = 0) ORDER BY female_id, male_id", params = list(batch))
+  if (nrow(pos) == 0) stop("该批次无正交记录")
   
-  # 如果输入的是名称，需要转换为 ID
-  if (!is_id) {
-    message("ℹ️ 正在将亲本名称转换为 ID...")
-    
-    # 获取 parents 表的所有 id 和 name 映射
-    parents_map <- dbGetQuery(con, "SELECT id, name FROM parents")
-    
-    # 转换 ma (母本, Mother)
-    data <- data %>%
-      left_join(parents_map, by = c("ma" = "name")) %>%
-      rename(female_id = id)
-      
-    # 转换 pa (父本, Father)
-    data <- data %>%
-      left_join(parents_map, by = c("pa" = "name"))
-    
-    # 此时列名中应该包含 id（来自第二次 join）
-    if ("id" %in% names(data)) {
-        data <- data %>% rename(male_id = id)
-    } else {
-        # 防御性编程：如果 dplyr 行为变化，可能是 id.y
-        if ("id.y" %in% names(data)) {
-             data <- data %>% rename(male_id = id.y)
-        } else {
-             # 极端情况，尝试按位置或打印列名调试，这里先假设为 id
-             stop("❌ 无法识别父本ID列，当前列名：", paste(names(data), collapse=", "))
-        }
-    }
-      
-    # 检查是否有未找到 ID 的亲本
-    missing_female <- is.na(data$female_id)
-    missing_male <- is.na(data$male_id)
-    
-    if (any(missing_female | missing_male)) {
-      n_miss <- sum(missing_female | missing_male)
-      warning(glue("⚠️ 有 {n_miss} 条记录无法找到对应的亲本ID，将被跳过"))
-      data <- data %>% filter(!is.na(female_id) & !is.na(male_id))
-    }
-  } else {
-    data <- data %>%
-      rename(female_id = ma, male_id = pa)
-  }
-  
-  if (nrow(data) == 0) {
-    message("ℹ️ 无有效数据可更新")
-    return(0)
-  }
-  
-  # 准备更新参数列表
-  # SQL: 
-  # - 有批次：UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?
-  # - 无批次：UPDATE crosses SET name = ?, updated_at = ? WHERE female_id = ? AND male_id = ?
   current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  params_list <- list()
+  sql_update <- "UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?"
   
-  # 遍历数据框构建参数
-  # 包含正交和反交的更新
-  idx <- 1
-  for (i in seq_len(nrow(data))) {
-    # 正交：ma=female_id (Mother), pa=male_id (Father)
-    if (use_batch) {
-      params_list[[idx]] <- list(
-        data$name[i],
-        current_time,
-        batch,
-        data$female_id[i],
-        data$male_id[i]
-      )
-    } else {
-      params_list[[idx]] <- list(
-        data$name[i],
-        current_time,
-        data$female_id[i],
-        data$male_id[i]
-      )
-    }
-    idx <- idx + 1
-    
-    # 反交：自动处理
-    # 规则：pa=male_id, ma=female_id
-    # 名称：将正交名称中的 "F0" 替换为 "RF0"
-    recip_name <- sub("F0", "RF0", data$name[i])
-    if (recip_name == data$name[i]) {
-       # 如果名称中没有 F0，尝试在开头加 R
-       recip_name <- paste0("R", data$name[i])
-    }
-    
-    if (use_batch) {
-      params_list[[idx]] <- list(
-        recip_name,
-        current_time,
-        batch,
-        data$male_id[i],   # 反交的母本是正交的父本
-        data$female_id[i]  # 反交的父本是正交的母本
-      )
-    } else {
-      params_list[[idx]] <- list(
-        recip_name,
-        current_time,
-        data$male_id[i],   # 反交的母本是正交的父本
-        data$female_id[i]  # 反交的父本是正交的母本
-      )
-    }
-    idx <- idx + 1
-  }
-  
-  # 使用事务批量执行
-  sql <- if (use_batch) {
-    "UPDATE crosses SET name = ?, updated_at = ? WHERE batch = ? AND female_id = ? AND male_id = ?"
-  } else {
-    "UPDATE crosses SET name = ?, updated_at = ? WHERE female_id = ? AND male_id = ?"
-  }
-  
-  total_updated <- 0
   dbBegin(con)
   tryCatch({
-    for (params in params_list) {
-      res <- dbExecute(con, sql, params = params)
-      total_updated <- total_updated + res
+    seqn <- start_n + seq_len(nrow(pos)) - 1
+    for (i in seq_len(nrow(pos))) {
+      # 2. 正交命名：前缀 + 位数 + F0
+      name_i <- paste0(prefix, sprintf(paste0("%0", digits, "d"), seqn[i]), "F0")
+      dbExecute(con, sql_update, params = list(name_i, current_time, batch, pos$female_id[i], pos$male_id[i]))
+      
+      # 3. 紧接着反交命名：正交名基础上 F0 前加 R
+      recip_name_i <- paste0(prefix, sprintf(paste0("%0", digits, "d"), seqn[i]), "RF0")
+      dbExecute(con, sql_update, params = list(recip_name_i, current_time, batch, pos$male_id[i], pos$female_id[i]))
     }
     dbCommit(con)
-    message(glue("✅ 成功更新 {total_updated} 条记录的名称"))
+    message(glue::glue("✅ 批次 {batch} 的 {nrow(pos)} 条正交及其反交名称已更新"))
+    
+    # 4. 返回该批次所有记录
+    result <- dbGetQuery(con, "SELECT * FROM crosses WHERE batch = ?", params = list(batch))
+    return(result)
   }, error = function(e) {
     dbRollback(con)
-    stop("❌ 批量更新失败：", e$message)
+    stop(e$message)
   })
-  
-  return(total_updated)
 }
+
 
 
 

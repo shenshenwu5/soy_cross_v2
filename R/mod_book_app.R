@@ -75,9 +75,9 @@ book_app_ui <- function(id) {
         # 操作按钮区
         fluidRow(
           column(12,
-                 actionButton(ns("btn_calc_preview"), "1. 生成预览", class = "btn-primary", icon = icon("play")),
+                 actionButton(ns("btn_save_db_name"), "1. 命名杂交名称(crosses_name)", class = "btn-danger", icon = icon("database")),
                  span(style = "margin: 0 10px;", "|"),
-                 actionButton(ns("btn_save_db_name"), "2. 填写杂交名称", class = "btn-danger", icon = icon("database")),
+                 actionButton(ns("btn_calc_preview"), "2. 生成预览", class = "btn-primary", icon = icon("play")),
                  span(style = "margin: 0 10px;", "|"),
                  downloadButton(ns("btn_export_xlsx"), "3. 导出 Excel 采集簿", class = "btn-success")
           )
@@ -118,25 +118,9 @@ book_app_server <- function(id, db_path = NULL) {
     )
     
     # 1. 初始化与批次加载
-    load_batches <- function() {
-      tryCatch({
-        con <- dbConnect(SQLite(), db_path)
-        on.exit(dbDisconnect(con), add = TRUE)
-        
-        if (dbExistsTable(con, "crosses")) {
-          batches <- dbGetQuery(con, "SELECT batch FROM crosses GROUP BY batch ORDER BY MAX(rowid) DESC")
-          return(batches$batch)
-        } else {
-          return(character(0))
-        }
-      }, error = function(e) {
-        showNotification(paste("读取批次失败:", e$message), type = "error")
-        return(character(0))
-      })
-    }
     
     observe({
-      batches <- load_batches()
+      batches <- load_batches(db_path)
       if (length(batches) > 0) {
         updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
       }
@@ -152,7 +136,7 @@ book_app_server <- function(id, db_path = NULL) {
       rid <- if (length(info$rid) == 0 || is.na(info$rid[1])) 0 else as.integer(info$rid[1])
       paste0(t, "|", n, "|", rid)
     }, function() {
-      load_batches()
+      load_batches(db_path)
     })
     
     observeEvent(batches_rx(), {
@@ -163,7 +147,7 @@ book_app_server <- function(id, db_path = NULL) {
     })
     
     observeEvent(input$refresh_batches, {
-      batches <- load_batches()
+      batches <- load_batches(db_path)
       if (length(batches) > 0) {
         updateSelectInput(session, "gen_batch", choices = batches, selected = batches[1])
         showNotification("批次列表已刷新", type = "message")
@@ -220,30 +204,30 @@ book_app_server <- function(id, db_path = NULL) {
             names(mydata)[names(mydata) == "name"] <- "male_name"
             mydata$ma <- mydata$male_name
             mydata$pa <- mydata$female_name
+            mydata$name <- mycross$name
           }
           
           # C. 生成组合编号
           incProgress(0.6, detail = "生成组合编号")
           
-          if (exists("get_combination")) {
-            combi_input <- data.frame(
+          if (exists("get_combination_with_name")) {
+            named_input <- data.frame(
+              name = if ("name" %in% names(mydata)) mydata$name else "",
               ma = mydata$male_name,
               pa = mydata$female_name,
-              memo = mydata$memo,#传入备注
+              memo = if ("memo" %in% names(mydata)) mydata$memo else "",
               stringsAsFactors = FALSE
             )
-            combi_input <- combi_input %>% arrange(desc(ma), desc(pa))
+            named_input <- named_input[order(named_input$name), , drop = FALSE]
             
-            my_combi <- get_combination(
-              combi_input,
-              prefix = input$gen_prefix,
+            my_combi <- get_combination_with_name(
+              named_input,
               startN = input$gen_start_n,
-              only = TRUE,
               order = FALSE
             )
             store_gen$my_combi <- my_combi
           } else {
-            stop("找不到 get_combination 函数")
+            stop("找不到 get_combination_with_name 函数")
           }
           
           # D. 生成种植排图
@@ -270,6 +254,8 @@ book_app_server <- function(id, db_path = NULL) {
           
           incProgress(1.0, detail = "完成")
           showNotification("预览生成成功", type = "message")
+          
+          
           
         }, error = function(e) {
           showNotification(paste("生成失败:", e$message), type = "error")
@@ -320,9 +306,10 @@ book_app_server <- function(id, db_path = NULL) {
                     class = "compact stripe hover")
     })
     
+    
+    
     # 4. 回写数据库
     observeEvent(input$btn_save_db_name, {
-      req(store_gen$my_combi)
       showModal(modalDialog(
         title = "确认回写数据库",
         "确定要将生成的组合名称 (Name) 更新回数据库吗？",
@@ -336,18 +323,16 @@ book_app_server <- function(id, db_path = NULL) {
     observeEvent(input$confirm_save_db, {
       removeModal()
       tryCatch({
-        if (exists("update_cross_names_from_df")) {
-          cols_to_update <- intersect(c("name", "ma", "pa"), names(store_gen$my_combi))
-          if (length(cols_to_update) == 0) stop("数据中缺少 name/ma/pa 字段")
-          update_cross_names_from_df(
-            data = store_gen$my_combi[, cols_to_update, drop=FALSE], 
-            batch = input$gen_batch,
-            db_path = db_path
-          )
-          showNotification("数据库更新成功", type = "message")
-        } else {
-          stop("找不到 update_cross_names_from_df 函数")
-        }
+        update_cross_names(
+          batch = input$gen_batch,
+          prefix = input$gen_prefix,
+          start_n = input$gen_start_n,
+          digits = input$gen_digits,
+          db_path = db_path
+        )
+        showNotification("数据库更新成功", type = "message")
+        
+        
       }, error = function(e) {
         showNotification(paste("更新失败:", e$message), type = "error")
       })

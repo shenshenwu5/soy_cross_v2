@@ -69,6 +69,9 @@ if (is.na(raw_db_path) || !nzchar(raw_db_path)) {
 # 辅助函数模块
 source(file.path(project_root, "R", "utils_io.R"))        # 通用IO函数
 source(file.path(project_root, "R", "mod_cross.R"))
+if (file.exists(file.path(project_root, "R", "mod_book.R"))) {
+  source(file.path(project_root, "R", "mod_book.R"))
+}
 if (file.exists(file.path(project_root, "R", "mod_analysis.R"))) {
   source(file.path(project_root, "R", "mod_analysis.R"))
 }

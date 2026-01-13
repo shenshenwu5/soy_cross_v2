@@ -1,9 +1,12 @@
+ 
+
 #devtools::load_all("E:/FangCloudSync/R_WD360/Project/soyplant")
 library(openxlsx)
 library(dplyr)
 source("R/mod_cross.R")
 library(soyplant)
 
+if (isTRUE(getOption("run_cross_book_job", FALSE))) {
 mycross<-get_crosses_by_batch("2025春季")
 
 mycross<-join_cross_parents(mycross)
@@ -57,8 +60,8 @@ my_combi <- soyplant::get_combination(
   order = FALSE
 )
 
-#回写到数据库，增加name信息
-update_cross_names_from_df(my_combi[c("name","ma","pa")],"2025春季")
+#回写到数据库，按批次命名
+update_cross_names(batch = "2025春季", prefix = MYPRE, start_n = startN, digits = digits)
 
 
 
@@ -84,5 +87,6 @@ soyplant::savewb(
   filename = myfilename,
   overwrite = TRUE
 )
+}
 
 

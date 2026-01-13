@@ -1,6 +1,6 @@
 # =============================================================================
 # 模块名称：mod_book_app.R
-# 功能描述：帐本生成模块（原 run_book_app.R 的逻辑封装）
+# 功能描述：采集簿生成模块（原 run_book_app.R 的逻辑封装）
 # =============================================================================
 
 library(shiny)
@@ -79,7 +79,7 @@ book_app_ui <- function(id) {
                  span(style = "margin: 0 10px;", "|"),
                  actionButton(ns("btn_save_db_name"), "2. 填写杂交名称", class = "btn-danger", icon = icon("database")),
                  span(style = "margin: 0 10px;", "|"),
-                 downloadButton(ns("btn_export_xlsx"), "3. 导出 Excel 帐本", class = "btn-success")
+                 downloadButton(ns("btn_export_xlsx"), "3. 导出 Excel 采集簿", class = "btn-success")
           )
         ),
         hr(),

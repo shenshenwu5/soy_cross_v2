@@ -1,6 +1,6 @@
 # =============================================================================
-# Shiny App: 帐本生成 (Book Generation)
-# Based on docs/生成帐本app框架.md
+# Shiny App: 采集簿生成 (Book Generation)
+# Based on docs/生成采集簿app框架.md
 # =============================================================================
 
 library(shiny)
@@ -61,7 +61,7 @@ if (length(missing_funcs) > 0) {
 # UI Definition
 # -----------------------------------------------------------------------------
 ui <- fluidPage(
-  titlePanel("杂交帐本生成系统"),
+  titlePanel("杂交采集簿生成系统")
   
   # 添加自定义 CSS 样式
   tags$head(
@@ -113,7 +113,7 @@ ui <- fluidPage(
                span(style = "margin: 0 10px;", "|"),
                actionButton("btn_save_db_name", "2. 填写杂交名称", class = "btn-danger", icon = icon("database")),
                span(style = "margin: 0 10px;", "|"),
-               downloadButton("btn_export_xlsx", "3. 导出 Excel 帐本", class = "btn-success")
+               downloadButton("btn_export_xlsx", "3. 导出 Excel 采集簿", class = "btn-success")
         )
       ),
       hr(),

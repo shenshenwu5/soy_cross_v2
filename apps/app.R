@@ -76,7 +76,7 @@ if (file.exists(file.path(project_root, "R", "mod_analysis.R"))) {
 # 业务功能模块
 source(file.path(project_root, "R", "mod_parent.R"))      # 亲本管理
 source(file.path(project_root, "R", "mod_cross_app.R"))   # 杂交配置
-source(file.path(project_root, "R", "mod_book_app.R"))    # 帐本生成
+source(file.path(project_root, "R", "mod_book_app.R"))    # 采集簿生成
 source(file.path(project_root, "R", "mod_matrix.R"))      # 矩阵视图
 source(file.path(project_root, "R", "mod_analysis_app.R")) # 统计分析
 
@@ -138,8 +138,8 @@ ui <- navbarPage(
     cross_app_ui("cross_mod")
   ),
   
-  # 3. 帐本生成
-  tabPanel("帐本生成",
+  # 3. 采集簿生成
+  tabPanel("采集簿生成",
     icon = icon("book"),
     book_app_ui("book_mod")
   ),
@@ -161,7 +161,7 @@ ui <- navbarPage(
     icon = icon("info-circle"),
     fluidPage(
       h3("大豆杂交管理系统 v2.0"),
-      p("集成了亲本管理、杂交组合设计、帐本生成及排图、数据可视化等功能。"),
+      p("集成了亲本管理、杂交组合设计、采集簿生成及排图、数据可视化等功能。"),
       hr(),
       p("项目路径: ", project_root),
       p("数据库路径: ", db_path),
@@ -183,7 +183,7 @@ server <- function(input, output, session) {
   # 2. 杂交配置
   cross_app_server("cross_mod", db_path = db_path)
   
-  # 3. 帐本生成
+  # 3. 采集簿生成
   book_app_server("book_mod", db_path = db_path)
   
   # 4. 矩阵视图

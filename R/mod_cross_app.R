@@ -72,15 +72,29 @@ cross_app_ui <- function(id) {
       ),
       tabPanel("C 组合矩阵",
         fluidPage(
-          div(style = 'overflow-x: hidden;', rHandsontableOutput(ns("matrix"))),
-          verbatimTextOutput(ns("matrix_summary")),
-          textInput(ns("batch"), "批次名", value = format(Sys.Date(), SoyCross$config$cross$default_batch_format)),
-          textInput(ns("memo"), "组合特点（必填）", value = SoyCross$config$cross_matrix$default_memo, placeholder = "请输入组合特点"),
-          numericInput(ns("limit"), "生成数量 (可选)", value = NA, min = 1),
-          actionButton(ns("run_write"), "写入数据库", class = "btn-danger"),
-          verbatimTextOutput(ns("run_summary")),
-          DT::dataTableOutput(ns("generated_table")),
-          DT::dataTableOutput(ns("skipped_table"))
+          fluidRow(
+            column(9,
+              div(style = 'overflow-x: hidden;', rHandsontableOutput(ns("matrix"))),
+              verbatimTextOutput(ns("matrix_summary")),
+              textInput(ns("batch"), "批次名", value = format(Sys.Date(), SoyCross$config$cross$default_batch_format)),
+              textInput(ns("memo"), "组合特点（必填）", value = SoyCross$config$cross_matrix$default_memo, placeholder = "请输入组合特点"),
+              numericInput(ns("limit"), "生成数量 (可选)", value = NA, min = 1),
+              actionButton(ns("run_write"), "写入数据库", class = "btn-danger"),
+              verbatimTextOutput(ns("run_summary")),
+              DT::dataTableOutput(ns("generated_table")),
+              DT::dataTableOutput(ns("skipped_table"))
+            ),
+            column(3, style = "border-left: 1px solid #ddd;",
+              h4("命名杂交名称"),
+              textInput(ns("naming_prefix"), "前缀 (Prefix)", value = format(Sys.Date(), SoyCross$config$field$default_prefix)),
+              numericInput(ns("naming_start_n"), "起始编号 (Start N)", value = SoyCross$config$field$default_start_n, min = 1),
+              numericInput(ns("naming_digits"), "编号位数 (Digits)", value = SoyCross$config$field$default_digits, min = 1),
+              actionButton(ns("run_crossed_name"), "命名杂交名称(crossed_name)", class = "btn-danger"),
+              br(), br(),
+              h5("已命名预览"),
+              DT::dataTableOutput(ns("tbl_named_preview"))
+            )
+          )
         )
       ),
       tabPanel("D 批次管理",
@@ -487,6 +501,55 @@ cross_app_server <- function(id, db_path = NULL) {
           mothers_used = paste(sort(unique(ids_to_names(pairs$female_id))), collapse = ";"),
           fathers_used = paste(sort(unique(ids_to_names(pairs$male_id))), collapse = ";")
         )
+      })
+    })
+
+    # 命名杂交名称：执行批量命名并预览
+    observeEvent(input$run_crossed_name, {
+      req(input$batch)
+      if (!nzchar(input$naming_prefix)) {
+        showNotification("前缀不能为空", type = "error")
+        return()
+      }
+      if (!is_latest_batch(input$batch, db_path = db_path)) {
+        showNotification("该批次不是最新生成的批次，禁止命名", type = "error")
+        return()
+      }
+      start_n <- if (is.null(input$naming_start_n)) 1 else input$naming_start_n
+      digits  <- if (is.null(input$naming_digits)) 3 else input$naming_digits
+      tryCatch({
+        update_cross_names(
+          batch   = input$batch,
+          prefix  = input$naming_prefix,
+          start_n = start_n,
+          digits  = digits,
+          db_path = db_path
+        )
+        showNotification("命名完成并已写入数据库", type = "message")
+        # 预览当前批次已命名记录
+        if (exists("get_named_preview")) {
+          preview_df <- get_named_preview(input$batch, db_path = db_path)
+        } else {
+          con <- dbConnect(RSQLite::SQLite(), db_path)
+          on.exit(dbDisconnect(con), add = TRUE)
+          preview_df <- DBI::dbGetQuery(
+            con,
+            "SELECT c.name, pm.name AS ma, pf.name AS pa
+             FROM crosses c
+             LEFT JOIN parents pf ON c.female_id = pf.id
+             LEFT JOIN parents pm ON c.male_id = pm.id
+             WHERE c.batch = ? AND c.name IS NOT NULL AND c.name <> ''
+             ORDER BY c.name ASC",
+            params = list(input$batch)
+          )
+        }
+        output$tbl_named_preview <- DT::renderDataTable({
+          DT::datatable(preview_df, class = "compact stripe hover", options = list(pageLength = 15, autoWidth = FALSE))
+        })
+        # 刷新矩阵摘要与批次列表
+        load_batches()
+      }, error = function(e) {
+        showNotification(paste("命名失败：", e$message), type = "error")
       })
     })
 

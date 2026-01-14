@@ -849,6 +849,9 @@ server <- function(input, output, session) {
   # 回写数据库
   observeEvent(input$btn_save_db_name, {
     tryCatch({
+      if (!is_latest_batch(input$gen_batch, db_path = db_path)) {
+        stop("该批次不是最新生成的批次，禁止命名")
+      }
       update_cross_names(
         batch = input$gen_batch,
         prefix = input$gen_prefix,

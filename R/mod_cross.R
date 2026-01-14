@@ -307,6 +307,9 @@ update_cross_names <- function(
   }
   if (missing(batch) || is.null(batch) || !nzchar(batch)) stop("批次不能为空")
   if (missing(prefix) || is.null(prefix) || !nzchar(prefix)) stop("前缀不能为空")
+  if (!is_latest_batch(batch, db_path = db_path)) {
+    stop("仅允许对最新生成的批次进行命名")
+  }
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
@@ -459,11 +462,43 @@ summarize_cross_batches_db <- function(
 }
 
 
+#' 获取最新批次（用于命名限制）
+#' @export
+get_latest_batch <- function(db_path = NULL) {
+  if (is.null(db_path)) {
+    db_path <- if (exists("SoyCross")) SoyCross$config$paths$db_path else "data/db/soy_cross.db"
+  }
+  if (!file.exists(db_path)) stop("❌ 数据库文件不存在：", db_path)
+  con <- dbConnect(SQLite(), db_path)
+  on.exit(dbDisconnect(con), add = TRUE)
+  sql <- "
+    SELECT
+      batch,
+      MAX(updated_at) AS last_updated
+    FROM crosses
+    WHERE batch IS NOT NULL
+    GROUP BY batch
+    ORDER BY last_updated DESC
+    LIMIT 1
+  "
+  res <- dbGetQuery(con, sql)
+  if (nrow(res) == 0 || is.na(res$batch[1])) return("")
+  as.character(res$batch[1])
+}
+
+#' 判断指定批次是否为最新批次
+#' @export
+is_latest_batch <- function(batch, db_path = NULL) {
+  if (missing(batch) || is.null(batch) || !nzchar(batch)) stop("❌ 参数错误：batch 不能为空")
+  latest <- get_latest_batch(db_path = db_path)
+  nzchar(latest) && identical(trimws(as.character(batch)), trimws(latest))
+}
+
 #' 检查特定组合是否存在
-#'
+#' 
 #' @description
 #' 检查数据库中是否存在指定的母本-父本组合
-#'
+#' 
 #' @param female 字符串，母本名称或ID
 #' @param male 字符串，父本名称或ID
 #' @param db_path 字符串，数据库路径

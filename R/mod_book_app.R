@@ -75,11 +75,9 @@ book_app_ui <- function(id) {
         # 操作按钮区
         fluidRow(
           column(12,
-                 actionButton(ns("btn_save_db_name"), "1. 命名杂交名称(crosses_name)", class = "btn-danger", icon = icon("database")),
+                 actionButton(ns("btn_calc_preview"), "1. 生成预览", class = "btn-primary", icon = icon("play")),
                  span(style = "margin: 0 10px;", "|"),
-                 actionButton(ns("btn_calc_preview"), "2. 生成预览", class = "btn-primary", icon = icon("play")),
-                 span(style = "margin: 0 10px;", "|"),
-                 downloadButton(ns("btn_export_xlsx"), "3. 导出 Excel 采集簿", class = "btn-success")
+                 downloadButton(ns("btn_export_xlsx"), "2. 导出 Excel 采集簿", class = "btn-success")
           )
         ),
         hr(),
@@ -324,35 +322,7 @@ book_app_server <- function(id, db_path = NULL) {
     
     
     
-    # 4. 回写数据库
-    observeEvent(input$btn_save_db_name, {
-      showModal(modalDialog(
-        title = "确认回写数据库",
-        "确定要将生成的组合名称 (Name) 更新回数据库吗？",
-        footer = tagList(
-          modalButton("取消"),
-          actionButton(ns("confirm_save_db"), "确认更新", class = "btn-danger")
-        )
-      ))
-    })
-    
-    observeEvent(input$confirm_save_db, {
-      removeModal()
-      tryCatch({
-        update_cross_names(
-          batch = input$gen_batch,
-          prefix = input$gen_prefix,
-          start_n = input$gen_start_n,
-          digits = input$gen_digits,
-          db_path = db_path
-        )
-        showNotification("数据库更新成功", type = "message")
-        
-        
-      }, error = function(e) {
-        showNotification(paste("更新失败:", e$message), type = "error")
-      })
-    })
+    # 4. （已移除）回写数据库命名功能，迁移至“杂交配置”模块的 C 页右侧
     
     # 5. 导出 Excel
     output$btn_export_xlsx <- downloadHandler(

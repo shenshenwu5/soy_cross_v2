@@ -168,67 +168,83 @@ book_app_server <- function(id, db_path = NULL) {
           incProgress(0.2, detail = "获取数据库记录")
           
           if (exists("get_crosses_by_batch")) {
-            mycross <- get_crosses_by_batch(batch = input$gen_batch, db_path = db_path)
+            mycross <- get_crosses_by_batch(batch = input$gen_batch, db_path = db_path, include_reciprocal = FALSE)
           } else {
             con <- dbConnect(SQLite(), db_path)
             on.exit(dbDisconnect(con), add = TRUE)
-            mycross <- dbGetQuery(con, "SELECT * FROM crosses WHERE batch = ?", params = list(input$gen_batch))
+            mycross <- dbGetQuery(con, "SELECT * FROM crosses WHERE batch = ? AND (is_reciprocal = 0 OR is_reciprocal IS NULL)", params = list(input$gen_batch))
           }
           
           if (nrow(mycross) == 0) {
-            showNotification("该批次无数据", type = "warning")
+            showNotification("该批次无正交数据", type = "warning")
             return()
           }
           
-          # 仅保留正交记录 (is_reciprocal == 0 或 NA)
-          if ("is_reciprocal" %in% names(mycross)) {
-            mycross <- mycross[mycross$is_reciprocal == 0 | is.na(mycross$is_reciprocal), ]
-            if (nrow(mycross) == 0) {
-              showNotification("该批次无正交记录", type = "warning")
-              return()
-            }
-          }
+          # 直接使用原始数据
+          mydata <- mycross
           
-          # B. 关联亲本信息
-          incProgress(0.4, detail = "关联亲本信息")
-          
-          if (exists("join_cross_parents")) {
-            mydata <- join_cross_parents(mycross, db_path = db_path)
-          } else {
-            con <- dbConnect(SQLite(), db_path)
-            parents <- dbGetQuery(con, "SELECT id, name FROM parents")
-            dbDisconnect(con)
-            mydata <- merge(mycross, parents, by.x="female_id", by.y="id", suffixes=c("", "_f"))
-            names(mydata)[names(mydata) == "name"] <- "female_name"
-            mydata <- merge(mydata, parents, by.x="male_id", by.y="id", suffixes=c("", "_m"))
-            names(mydata)[names(mydata) == "name"] <- "male_name"
-            mydata$ma <- mydata$male_name
-            mydata$pa <- mydata$female_name
-            mydata$name <- mycross$name
-          }
-          
-          # C. 生成组合编号
+          # B. 生成组合编号
           incProgress(0.6, detail = "生成组合编号")
           
           if (exists("get_combination_with_name")) {
+            n_rows <- nrow(mydata)
+            
+            # 提取并处理亲本列，确保为字符型且长度一致
+            ma_vec <- if ("ma" %in% names(mydata)) mydata$ma else if ("female_id" %in% names(mydata)) mydata$female_id else rep("", n_rows)
+            pa_vec <- if ("pa" %in% names(mydata)) mydata$pa else if ("male_id" %in% names(mydata)) mydata$male_id else rep("", n_rows)
+            
             named_input <- data.frame(
-              name = if ("name" %in% names(mydata)) mydata$name else "",
-              ma = mydata$male_name,
-              pa = mydata$female_name,
-              memo = if ("memo" %in% names(mydata)) mydata$memo else "",
+              name = if ("name" %in% names(mydata)) as.character(mydata$name) else rep("", n_rows),
+              ma = as.character(ma_vec),
+              pa = as.character(pa_vec),
+              memo = if ("memo" %in% names(mydata)) as.character(mydata$memo) else rep("", n_rows),
               stringsAsFactors = FALSE
             )
-            named_input <- named_input[order(named_input$name), , drop = FALSE]
+            
+            # 处理 NA 值
+            named_input[is.na(named_input)] <- ""
+            
+            # 按 name 排序
+            if ("name" %in% names(named_input)) {
+               named_input <- named_input[order(named_input$name), , drop = FALSE]
+            }
+            
+            # 确保参数有效
+            start_n_val <- if (!is.null(input$gen_start_n)) input$gen_start_n else 1
             
             my_combi <- get_combination_with_name(
               named_input,
-              startN = input$gen_start_n,
+              startN = start_n_val,
               order = FALSE
             )
             store_gen$my_combi <- my_combi
           } else {
             stop("找不到 get_combination_with_name 函数")
           }
+          
+          
+          
+          # C. 将 store_gen$my_combi 中的 ma 与 parents 表中的 id 进行关联，替换为 parents 中的 name（仅替换 ma）
+          con <- dbConnect(SQLite(), db_path)
+          on.exit(dbDisconnect(con), add = TRUE)
+          parents_df <- dbGetQuery(con, "SELECT id, name FROM parents")
+          
+          # 确保 ma 为字符型，避免因子问题
+          store_gen$my_combi$ma <- as.character(store_gen$my_combi$ma)
+          
+          # 仅替换 ma 字段内容：先建立 id->name 的映射，再替换 ma 列
+          id2name <- setNames(parents_df$name, parents_df$id)
+          store_gen$my_combi$ma <- id2name[store_gen$my_combi$ma]
+          # 如果存在未匹配到的 id，保持原值不变
+          store_gen$my_combi$ma[is.na(store_gen$my_combi$ma)] <- 
+            as.character(store_gen$my_combi$ma)[is.na(store_gen$my_combi$ma)]
+          
+          # 同样方法替换 pa 字段
+          store_gen$my_combi$pa <- as.character(store_gen$my_combi$pa)
+          store_gen$my_combi$pa <- id2name[store_gen$my_combi$pa]
+          store_gen$my_combi$pa[is.na(store_gen$my_combi$pa)] <- 
+            as.character(store_gen$my_combi$pa)[is.na(store_gen$my_combi$pa)]
+            
           
           # D. 生成种植排图
           incProgress(0.8, detail = "生成排图计划")

@@ -26,14 +26,18 @@ get_named_preview <- function(batch, db_path) {
 
 get_combination_with_name <- function (mydata,
 startN = 1,
- order = FALSE) 
+order = FALSE) 
 {
+    # 确保 mydata 有必要的列，如果没有则尝试使用默认值
+    if (!"ma" %in% names(mydata) && "female_id" %in% names(mydata)) mydata$ma <- mydata$female_id
+    if (!"pa" %in% names(mydata) && "male_id" %in% names(mydata)) mydata$pa <- mydata$male_id
+    
     mapa <- data.frame(
         name = as.character(mydata$name),
         ma = as.character(mydata$ma),
         pa = as.character(mydata$pa),
         mapa = paste0(as.character(mydata$ma), "/", as.character(mydata$pa)),
-        memo = as.character(mydata$memo),
+        memo = if("memo" %in% names(mydata)) as.character(mydata$memo) else rep("", nrow(mydata)),
         stringsAsFactors = FALSE
     )
 
@@ -52,12 +56,24 @@ startN = 1,
     re_v$source <- NA
     re_v$former_fieldid <- NA
     re_v$former_stageid <- NA
-    field <- subset(field, grepl("combination", table, ignore.case = TRUE))
-    for (col in as.character(field$name)) {
-        if (!col %in% names(re_v)) {
-            re_v[[col]] <- NA
+    
+    # 尝试使用外部定义的 field 变量进行列排序，如果不存在则跳过或使用默认
+    if (exists("field")) {
+        field_sub <- subset(field, grepl("combination", table, ignore.case = TRUE))
+        if (nrow(field_sub) > 0) {
+            for (col in as.character(field_sub$name)) {
+                if (!col %in% names(re_v)) {
+                    re_v[[col]] <- NA
+                }
+            }
+            # 仅保留 field 中存在的列
+            valid_cols <- as.character(field_sub$name)
+            valid_cols <- valid_cols[valid_cols %in% names(re_v)]
+            if (length(valid_cols) > 0) {
+                 re_v <- re_v[valid_cols]
+            }
         }
     }
-    re_v <- re_v[as.character(field$name)]
+    
     return(re_v)
 }

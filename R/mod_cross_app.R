@@ -657,7 +657,10 @@ cross_app_server <- function(id, db_path = NULL) {
       batch_name <- df_b$batch[s]
       showModal(modalDialog(
         title = "确认删除",
-        paste0("确定要删除批次 '", batch_name, "' 吗？此操作将删除该批次下所有记录，且不可恢复！"),
+        tagList(
+          p(paste0("确定要删除批次 '", batch_name, "' 吗？此操作将删除该批次下所有记录，且不可恢复！")),
+          textInput(ns("confirm_delete_text"), "请输入批次名称以确认删除", value = "")
+        ),
         footer = tagList(
           modalButton("取消"),
           actionButton(ns("confirm_delete_batch"), "确认删除", class = "btn-danger")
@@ -666,11 +669,16 @@ cross_app_server <- function(id, db_path = NULL) {
     })
     
     observeEvent(input$confirm_delete_batch, {
-      removeModal()
       s <- input$batch_list_table_rows_selected
       if (length(s) == 0) return()
       df_b <- batches_df()
       batch_name <- df_b$batch[s]
+      typed <- trimws(input$confirm_delete_text %||% "")
+      if (!identical(typed, trimws(batch_name))) {
+        showNotification("输入的批次名称不匹配，未执行删除", type = "error")
+        return()
+      }
+      removeModal()
       tryCatch({
         con <- dbConnect(SQLite(), db_path)
         dbExecute(con, "DELETE FROM crosses WHERE batch = ?", params = list(batch_name))

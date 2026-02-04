@@ -3,20 +3,76 @@
 # 整合版主程序
 # =============================================================================
 
-library(shiny)
-library(DT)
-library(DBI)
-library(RSQLite)
-library(dplyr)
-library(glue)
-library(rhandsontable)
+#!/usr/bin/env Rscript
+# 安装依赖脚本 - 运行此脚本安装所有需要的包
 
-# 尝试加载 soyplant 包
-tryCatch({
-  library(soyplant)
-}, error = function(e) {
-  message("Please install soyplant： devtools::install_github('zhaoqingsonga/soyplant')")
-})
+cat("
+=======================================
+  安装 Shiny 应用所需的所有依赖包
+=======================================\n\n")
+
+# 设置选项
+options(
+  repos = c(CRAN = "https://cloud.r-project.org"),
+  timeout = 300  # 延长超时时间
+)
+
+# 1. 安装CRAN包
+cat("1. 安装CRAN包...\n")
+cran_packages <- c("shiny", "DT", "DBI", "RSQLite", "dplyr", "glue", "rhandsontable", "remotes")
+
+for (pkg in cran_packages) {
+  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    cat(sprintf("  正在安装: %-15s", pkg))
+    install.packages(pkg, quiet = TRUE)
+    cat(" [完成]\n")
+  } else {
+    cat(sprintf("  已安装:   %-15s [跳过]\n", pkg))
+  }
+}
+
+# 2. 安装GitHub包
+cat("\n2. 安装GitHub包...\n")
+github_packages <- list(
+  soyplant = "zhaoqingsonga/soyplant"
+)
+
+for (pkg_name in names(github_packages)) {
+  repo <- github_packages[[pkg_name]]
+  
+  if (!require(pkg_name, character.only = TRUE, quietly = TRUE)) {
+    cat(sprintf("  正在安装: %-15s", pkg_name))
+    cat(sprintf(" (来自: %s)\n", repo))
+    
+    tryCatch({
+      remotes::install_github(repo, quiet = TRUE)
+      cat("  安装成功！\n")
+    }, error = function(e) {
+      cat(sprintf("  安装失败: %s\n", e$message))
+      cat("  尝试使用devtools...\n")
+      
+      if (!require("devtools", quietly = TRUE)) {
+        install.packages("devtools", quiet = TRUE)
+      }
+      devtools::install_github(repo, quiet = TRUE)
+    })
+  } else {
+    cat(sprintf("  已安装:   %-15s [跳过]\n", pkg_name))
+  }
+}
+
+#cat("\n" + strrep("=", 40) + "\n")
+cat("✅ 所有依赖包已安装完成！\n")
+cat("现在可以运行主程序了。\n")
+
+# 验证安装
+cat("\n验证安装...\n")
+library(shiny)
+library(soyplant)
+cat("✅ 验证通过！\n")
+
+
+#
 
 # === 加载配置 ===
 tryCatch({
